@@ -319,8 +319,8 @@ export async function getTodaySalesSummary(organizationId: string, storeId: stri
     .select({
       total: sql<number>`COALESCE(SUM(${sales.total}::numeric), 0)::float`,
       count: sql<number>`COUNT(*)::int`,
-      cash: sql<number>`COALESCE(SUM(CASE WHEN p.method = 'cash' THEN p.amount::numeric ELSE 0 END), 0)::float`,
-      card: sql<number>`COALESCE(SUM(CASE WHEN p.method = 'card' THEN p.amount::numeric ELSE 0 END), 0)::float`,
+      cash: sql<number>`COALESCE(SUM(CASE WHEN ${salePayments.method} = 'cash' THEN ${salePayments.amount}::numeric ELSE 0 END), 0)::float`,
+      card: sql<number>`COALESCE(SUM(CASE WHEN ${salePayments.method} = 'card' THEN ${salePayments.amount}::numeric ELSE 0 END), 0)::float`,
       credit: sql<number>`COALESCE(SUM(${sales.dueAmount}::numeric), 0)::float`,
     })
     .from(sales)
