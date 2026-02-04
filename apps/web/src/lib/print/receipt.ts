@@ -456,49 +456,187 @@ export async function generateReceiptText(sale: LocalSale): Promise<string> {
   return receipt;
 }
 
-// Print receipt using browser print dialog
-export async function printReceipt(sale: LocalSale): Promise<boolean> {
+// Cached serial port for thermal printer
+let cachedPrinterPort: SerialPort | null = null;
+
+// Connect to thermal printer (call once on app start or settings)
+export async function connectThermalPrinter(): Promise<boolean> {
+  if (!('serial' in navigator)) {
+    console.log('Web Serial API not supported - using browser print');
+    return false;
+  }
+
   try {
-    const html = await generateReceiptHTML(sale);
-
-    // Create a hidden iframe for printing
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) {
-      throw new Error('Could not access iframe document');
+    // @ts-ignore - Web Serial API
+    const ports = await navigator.serial.getPorts();
+    if (ports.length > 0) {
+      cachedPrinterPort = ports[0];
+      return true;
     }
 
-    doc.open();
-    doc.write(html);
-    doc.close();
+    // Request port if none cached
+    // @ts-ignore
+    cachedPrinterPort = await navigator.serial.requestPort();
+    return true;
+  } catch (error) {
+    console.log('No thermal printer connected');
+    return false;
+  }
+}
 
-    // Wait for content to load
-    await new Promise((resolve) => setTimeout(resolve, 100));
+// Print directly to thermal printer (no dialog)
+async function printDirectToThermal(sale: LocalSale): Promise<boolean> {
+  if (!cachedPrinterPort) {
+    // Try to get previously authorized port
+    if ('serial' in navigator) {
+      try {
+        // @ts-ignore
+        const ports = await navigator.serial.getPorts();
+        if (ports.length > 0) {
+          cachedPrinterPort = ports[0];
+        }
+      } catch {
+        return false;
+      }
+    }
+  }
 
-    // Print
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
+  if (!cachedPrinterPort) {
+    return false;
+  }
 
-    // Cleanup
-    setTimeout(() => {
-      document.body.removeChild(iframe);
-    }, 1000);
+  try {
+    // Open port if not already open
+    if (!cachedPrinterPort.readable) {
+      await cachedPrinterPort.open({ baudRate: 9600 });
+    }
 
-    // Update sale as printed
-    await db.sales.update(sale.id, { receiptPrinted: true });
+    const commands = await generateESCPOSCommands(sale);
+    const writer = cachedPrinterPort.writable?.getWriter();
+
+    if (writer) {
+      await writer.write(commands);
+      writer.releaseLock();
+    }
 
     return true;
   } catch (error) {
+    console.error('Direct thermal print failed:', error);
+    // Reset port on error
+    try {
+      await cachedPrinterPort.close();
+    } catch {}
+    cachedPrinterPort = null;
+    return false;
+  }
+}
+
+// Silent browser print (minimal interaction)
+async function printViaBrowser(sale: LocalSale): Promise<boolean> {
+  const html = await generateReceiptHTML(sale);
+
+  // Create print window
+  const printWindow = window.open('', '_blank', 'width=300,height=600');
+  if (!printWindow) {
+    // Popup blocked - use iframe fallback
+    return printViaIframe(html);
+  }
+
+  printWindow.document.write(html);
+  printWindow.document.close();
+
+  // Wait for content to load
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  // Print and close
+  printWindow.print();
+  printWindow.close();
+
+  return true;
+}
+
+// Iframe fallback for printing
+async function printViaIframe(html: string): Promise<boolean> {
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:none;';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    document.body.removeChild(iframe);
+    return false;
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  iframe.contentWindow?.print();
+
+  setTimeout(() => document.body.removeChild(iframe), 1000);
+  return true;
+}
+
+// Main print function - tries thermal first, then browser
+export async function printReceipt(sale: LocalSale): Promise<boolean> {
+  try {
+    // Try direct thermal printing first (silent, no dialog)
+    const thermalSuccess = await printDirectToThermal(sale);
+
+    if (thermalSuccess) {
+      // Mark as printed
+      await db.sales.update(sale.id, { receiptPrinted: true });
+      return true;
+    }
+
+    // Fall back to browser print
+    const browserSuccess = await printViaBrowser(sale);
+
+    if (browserSuccess) {
+      await db.sales.update(sale.id, { receiptPrinted: true });
+    }
+
+    return browserSuccess;
+  } catch (error) {
     console.error('Print failed:', error);
     return false;
+  }
+}
+
+// Setup printer connection (call from settings page)
+export async function setupPrinter(): Promise<{ success: boolean; message: string }> {
+  if (!('serial' in navigator)) {
+    return {
+      success: false,
+      message: 'Your browser does not support direct thermal printing. Use Chrome or Edge. Receipts will print via browser dialog.',
+    };
+  }
+
+  try {
+    // @ts-ignore
+    cachedPrinterPort = await navigator.serial.requestPort();
+    await cachedPrinterPort.open({ baudRate: 9600 });
+
+    // Test print
+    const encoder = new TextEncoder();
+    const writer = cachedPrinterPort.writable?.getWriter();
+    if (writer) {
+      // Send test message
+      const testMsg = encoder.encode('\x1B\x40\x1B\x61\x01Printer Connected!\n\x1B\x64\x02\x1D\x56\x01');
+      await writer.write(testMsg);
+      writer.releaseLock();
+    }
+
+    return {
+      success: true,
+      message: 'Thermal printer connected! Receipts will print automatically.',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Could not connect to printer. Make sure it is plugged in via USB.',
+    };
   }
 }
 

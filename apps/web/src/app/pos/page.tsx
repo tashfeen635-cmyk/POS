@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Trash2, Printer } from 'lucide-react';
+import { Search, Trash2, Printer, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { useCartStore } from '@/stores/cart.store';
 import { useCreateSale } from '@/hooks/useSales';
 import { formatCurrency } from '@/lib/utils/format';
 import { toast } from '@/components/ui/toaster';
-import { printReceipt } from '@/lib/print/receipt';
+import { printReceipt, setupPrinter } from '@/lib/print/receipt';
 import { IMEISelector } from '@/components/pos/IMEISelector';
 import { BatchSelector } from '@/components/pos/BatchSelector';
 import { IMEI_TRACKED_TYPES, BATCH_TRACKED_TYPES } from '@pos/shared';
@@ -198,6 +198,16 @@ export function POSPage() {
     } catch {}
   };
 
+  // Setup thermal printer connection
+  const handleSetupPrinter = async () => {
+    const result = await setupPrinter();
+    toast({
+      title: result.success ? 'Printer Ready' : 'Printer Setup',
+      description: result.message,
+      variant: result.success ? 'success' : 'default',
+    });
+  };
+
   return (
     <div className="h-[calc(100vh-5rem)] flex gap-4">
       {/* Left: Product Grid */}
@@ -357,11 +367,22 @@ export function POSPage() {
             )}
           </Button>
 
-          {/* Keyboard hints */}
-          <div className="text-xs text-center text-muted-foreground space-x-3">
-            <span>F1: Search</span>
-            <span>F3: Pay</span>
-            <span>F4: Clear</span>
+          {/* Keyboard hints & Printer Setup */}
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="space-x-2">
+              <span>F1: Search</span>
+              <span>F3: Pay</span>
+              <span>F4: Clear</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs"
+              onClick={handleSetupPrinter}
+            >
+              <Settings2 className="h-3 w-3 mr-1" />
+              Printer
+            </Button>
           </div>
         </div>
       </Card>
