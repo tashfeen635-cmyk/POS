@@ -631,3 +631,62 @@ export async function getDetailedSyncStatus() {
     isOnline: useUIStore.getState().isOnline,
   };
 }
+
+// Clear permanently failed items from sync queue
+export async function clearPermanentlyFailedItems(): Promise<number> {
+  const failedItems = await db.syncQueue
+    .where('status')
+    .equals('failed')
+    .filter((item) => item.attempts >= item.maxAttempts)
+    .toArray();
+
+  const count = failedItems.length;
+  if (count > 0) {
+    const ids = failedItems.map((item) => item.id).filter((id): id is number => id !== undefined);
+    await db.syncQueue.bulkDelete(ids);
+    syncLogger.info(`Cleared ${count} permanently failed items from sync queue`);
+  }
+
+  return count;
+}
+
+// Clear a specific item from sync queue by record ID
+export async function clearSyncItem(recordId: string): Promise<boolean> {
+  const item = await db.syncQueue.where('recordId').equals(recordId).first();
+  if (item?.id) {
+    await db.syncQueue.delete(item.id);
+    syncLogger.info(`Cleared sync item: ${recordId}`);
+    return true;
+  }
+  return false;
+}
+
+// Reset failed items to retry (with reset attempts)
+export async function resetFailedItems(): Promise<number> {
+  const now = new Date().toISOString();
+
+  const failedItems = await db.syncQueue
+    .where('status')
+    .equals('failed')
+    .toArray();
+
+  let resetCount = 0;
+  for (const item of failedItems) {
+    if (item.id) {
+      await db.syncQueue.update(item.id, {
+        status: 'pending',
+        attempts: 0,
+        nextRetryAt: now,
+        lastError: null,
+      });
+      resetCount++;
+    }
+  }
+
+  if (resetCount > 0) {
+    syncLogger.info(`Reset ${resetCount} failed items for retry`);
+    await performSync();
+  }
+
+  return resetCount;
+}

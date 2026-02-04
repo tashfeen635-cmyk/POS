@@ -63,10 +63,18 @@ export const updateBatchSchema = z.object({
   notes: z.string().optional().nullable(),
 });
 
+// Helper to convert string boolean values from query params
+const stringToBoolean = (val: unknown) => {
+  if (val === undefined || val === null || val === '') return undefined;
+  if (val === 'true' || val === true) return true;
+  if (val === 'false' || val === false) return false;
+  return undefined;
+};
+
 export const batchFilterSchema = z.object({
   productId: z.string().uuid().optional(),
-  expiringSoon: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
-  expired: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
+  expiringSoon: z.preprocess(stringToBoolean, z.boolean().optional()),
+  expired: z.preprocess(stringToBoolean, z.boolean().optional()),
   search: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),

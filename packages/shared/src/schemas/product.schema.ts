@@ -83,12 +83,20 @@ export const createProductSchema = z.object({
 
 export const updateProductSchema = createProductSchema.partial();
 
+// Helper to convert string boolean values from query params
+const stringToBoolean = (val: unknown) => {
+  if (val === undefined || val === null || val === '') return undefined;
+  if (val === 'true' || val === true) return true;
+  if (val === 'false' || val === false) return false;
+  return undefined;
+};
+
 export const productFilterSchema = z.object({
   search: z.string().optional(),
   categoryId: z.string().uuid().optional(),
   productType: productTypeEnum.optional(),
-  isActive: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
-  lowStock: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
+  isActive: z.preprocess(stringToBoolean, z.boolean().optional()),
+  lowStock: z.preprocess(stringToBoolean, z.boolean().optional()),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });

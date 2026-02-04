@@ -68,7 +68,8 @@ export async function processSync(
             if (!existing) {
               // Create the sale using the sale service
               try {
-                const saleInput = data as unknown as CreateSaleInput;
+                // Transform LocalSale data to CreateSaleInput format
+                const saleInput = transformLocalSaleToInput(data as Record<string, unknown>);
                 saleInput.offlineId = id; // Ensure offlineId is set
 
                 await saleService.createSale(organizationId, storeId, userId, saleInput);
@@ -459,6 +460,42 @@ export async function pullChanges(
   };
 }
 
+// Transform LocalSale data (from client) to CreateSaleInput format
+function transformLocalSaleToInput(data: Record<string, unknown>): CreateSaleInput {
+  // The client stores LocalSale format with string prices and denormalized data
+  // We need to transform it to CreateSaleInput format
+
+  const items = (data.items as Array<Record<string, unknown>> || []).map((item) => ({
+    productId: item.productId as string,
+    imeiId: (item.imeiId as string) || null,
+    batchId: (item.batchId as string) || null,
+    quantity: typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity as string) || 1,
+    unitPrice: typeof item.unitPrice === 'number' ? item.unitPrice : parseFloat(item.unitPrice as string) || 0,
+    discount: typeof item.discount === 'number' ? item.discount : parseFloat(item.discount as string) || 0,
+    discountPercent: typeof item.discountPercent === 'number' ? item.discountPercent : parseFloat(item.discountPercent as string) || 0,
+    taxRate: typeof item.taxRate === 'number' ? item.taxRate : parseFloat(item.taxRate as string) || 0,
+    notes: (item.notes as string) || null,
+  }));
+
+  const payments = (data.payments as Array<Record<string, unknown>> || []).map((payment) => ({
+    method: payment.method as 'cash' | 'card' | 'upi' | 'bank_transfer' | 'credit' | 'trade_in',
+    amount: typeof payment.amount === 'number' ? payment.amount : parseFloat(payment.amount as string) || 0,
+    reference: (payment.reference as string) || null,
+    tradeInId: (payment.tradeInId as string) || null,
+    notes: (payment.notes as string) || null,
+  }));
+
+  return {
+    customerId: (data.customerId as string) || null,
+    items,
+    payments,
+    discount: typeof data.discount === 'number' ? data.discount : parseFloat(data.discount as string) || 0,
+    discountPercent: typeof data.discountPercent === 'number' ? data.discountPercent : parseFloat(data.discountPercent as string) || 0,
+    notes: (data.notes as string) || null,
+    offlineId: (data.offlineId as string) || undefined,
+  };
+}
+
 // Push changes for a specific table (for POST /api/sync/:table)
 export async function pushTableChanges(
   organizationId: string,
@@ -501,8 +538,8 @@ export async function pushTableChanges(
                 serverId: existing.id,
               });
             } else {
-              // Create the sale
-              const saleInput = item.data as unknown as CreateSaleInput;
+              // Transform LocalSale data to CreateSaleInput format
+              const saleInput = transformLocalSaleToInput(item.data);
               saleInput.offlineId = item.clientId;
 
               const sale = await saleService.createSale(organizationId, storeId, userId, saleInput);
