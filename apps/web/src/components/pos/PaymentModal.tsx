@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Banknote, CreditCard, Smartphone, Wallet, WifiOff } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Banknote, CreditCard, Smartphone, Wallet, WifiOff, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,6 +21,8 @@ import { ReceiptDialog } from './ReceiptDialog';
 import { PAYMENT_METHODS } from '@pos/shared';
 import type { PaymentMethod } from '@pos/shared';
 import type { LocalSale } from '@/lib/db/schema';
+import { getQuickAmounts } from '@/hooks/useFavorites';
+import { LoadingOverlay } from '@/components/ui/skeleton';
 
 interface PaymentModalProps {
   open: boolean;
@@ -28,10 +30,10 @@ interface PaymentModalProps {
 }
 
 const paymentMethods = [
-  { id: PAYMENT_METHODS.CASH, label: 'Cash', icon: Banknote },
-  { id: PAYMENT_METHODS.CARD, label: 'Card', icon: CreditCard },
-  { id: PAYMENT_METHODS.UPI, label: 'JazzCash/Easypaisa', icon: Smartphone },
-  { id: PAYMENT_METHODS.CREDIT, label: 'Credit (Udhaar)', icon: Wallet },
+  { id: PAYMENT_METHODS.CASH, label: 'Cash', icon: Banknote, shortcut: '1' },
+  { id: PAYMENT_METHODS.CARD, label: 'Card', icon: CreditCard, shortcut: '2' },
+  { id: PAYMENT_METHODS.UPI, label: 'JazzCash/Easypaisa', icon: Smartphone, shortcut: '3' },
+  { id: PAYMENT_METHODS.CREDIT, label: 'Credit (Udhaar)', icon: Wallet, shortcut: '4' },
 ];
 
 export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
@@ -56,10 +58,73 @@ export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
   const [reference, setReference] = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
   const [completedSale, setCompletedSale] = useState<LocalSale | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const paidAmount = payments.reduce((sum, p) => sum + p.amount, 0);
   const remainingAmount = total - paidAmount;
   const changeAmount = Math.max(0, paidAmount - total);
+
+  // Generate dynamic quick amounts based on remaining
+  const quickAmounts = getQuickAmounts(remainingAmount > 0 ? remainingAmount : total);
+
+  // Validate amount
+  const validateAmount = useCallback((value: string): string | null => {
+    const num = parseFloat(value);
+    if (value && isNaN(num)) {
+      return 'Invalid amount';
+    }
+    if (num < 0) {
+      return 'Amount cannot be negative';
+    }
+    return null;
+  }, []);
+
+  // Update validation on amount change
+  useEffect(() => {
+    setValidationError(validateAmount(amount));
+  }, [amount, validateAmount]);
+
+  // Keyboard shortcuts for payment methods (1-4)
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture if typing in input
+      if ((e.target as HTMLElement).tagName === 'INPUT') {
+        // Allow Enter to complete sale from input
+        if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
+          e.preventDefault();
+          if (canCompleteSale) {
+            handleCompleteSale();
+          }
+        }
+        return;
+      }
+
+      // Payment method shortcuts (1-4)
+      const methodIndex = parseInt(e.key) - 1;
+      if (methodIndex >= 0 && methodIndex < paymentMethods.length) {
+        e.preventDefault();
+        setSelectedMethod(paymentMethods[methodIndex].id);
+        return;
+      }
+
+      // Enter to complete sale
+      if (e.key === 'Enter' && canCompleteSale) {
+        e.preventDefault();
+        handleCompleteSale();
+      }
+
+      // E for exact amount
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        handleExactAmount();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, selectedMethod, payments, remainingAmount, total]);
 
   const handleAddPayment = () => {
     const paymentAmount = parseFloat(amount) || remainingAmount;
@@ -76,7 +141,16 @@ export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
     setReference('');
   };
 
+  const handleExactAmount = () => {
+    const exactAmount = remainingAmount > 0 ? remainingAmount : total;
+    setAmount(String(exactAmount));
+  };
+
+  const canCompleteSale = !createSale.isPending && !(payments.length > 0 && remainingAmount > 0) && !validationError;
+
   const handleCompleteSale = async () => {
+    if (!canCompleteSale) return;
+
     // Add payment if not already added
     if (payments.length === 0) {
       const paymentAmount = parseFloat(amount) || total;
@@ -99,7 +173,7 @@ export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
           unitPrice: item.unitPrice,
           discount: item.discount,
           discountPercent: item.discountPercent,
-          taxRate: item.product.taxRate ? parseFloat(item.product.taxRate) : 0,
+          taxRate: item.product.taxRate ? parseFloat(String(item.product.taxRate)) : 0,
         })),
         payments:
           payments.length > 0
@@ -143,6 +217,7 @@ export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
     clearPayments();
     setAmount('');
     setReference('');
+    setValidationError(null);
     onOpenChange(false);
   };
 
@@ -154,6 +229,9 @@ export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
 
   return (
     <>
+      {/* Loading overlay during payment processing */}
+      {createSale.isPending && <LoadingOverlay message="Processing payment..." />}
+
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -182,32 +260,49 @@ export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
               <p className="text-3xl font-bold">{formatCurrency(total)}</p>
             </div>
 
-            {/* Payment Methods */}
+            {/* Payment Methods with keyboard hints */}
             <div className="grid grid-cols-2 gap-2">
               {paymentMethods.map((method) => (
                 <Button
                   key={method.id}
                   variant={selectedMethod === method.id ? 'default' : 'outline'}
-                  className="h-auto py-3 flex flex-col gap-1"
+                  className="h-auto py-3 flex flex-col gap-1 relative"
                   onClick={() => setSelectedMethod(method.id)}
                 >
+                  {selectedMethod === method.id && (
+                    <Check className="h-3 w-3 absolute top-1 right-1" />
+                  )}
                   <method.icon className="h-5 w-5" />
                   <span className="text-xs">{method.label}</span>
+                  <span className="text-[10px] text-muted-foreground">Press {method.shortcut}</span>
                 </Button>
               ))}
             </div>
 
-            {/* Amount Input */}
+            {/* Amount Input with validation */}
             <div>
-              <Label htmlFor="amount">Amount (PKR)</Label>
+              <div className="flex justify-between items-center">
+                <Label htmlFor="amount">Amount (PKR)</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={handleExactAmount}
+                >
+                  Exact (E)
+                </Button>
+              </div>
               <Input
                 id="amount"
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder={formatCurrency(remainingAmount > 0 ? remainingAmount : total)}
-                className="text-lg"
+                className={`text-lg ${validationError ? 'border-destructive' : ''}`}
               />
+              {validationError && (
+                <p className="text-xs text-destructive mt-1">{validationError}</p>
+              )}
             </div>
 
             {/* Reference for non-cash */}
@@ -253,31 +348,38 @@ export function PaymentModal({ open, onOpenChange }: PaymentModalProps) {
               </>
             )}
 
-            {/* Quick amounts */}
+            {/* Dynamic quick amounts */}
             <div className="flex gap-2">
-              {[100, 500, 1000, 5000].map((quickAmount) => (
+              {quickAmounts.map((quickAmount) => (
                 <Button
                   key={quickAmount}
-                  variant="outline"
+                  variant={quickAmount === remainingAmount || quickAmount === total ? 'secondary' : 'outline'}
                   size="sm"
                   className="flex-1"
                   onClick={() => setAmount(String(quickAmount))}
                 >
-                  {quickAmount}
+                  {quickAmount === remainingAmount && remainingAmount > 0
+                    ? 'Exact'
+                    : formatCurrency(quickAmount)}
                 </Button>
               ))}
             </div>
+
+            {/* Keyboard hint */}
+            <p className="text-xs text-muted-foreground text-center">
+              Press Enter to complete sale
+            </p>
           </div>
 
           <DialogFooter className="gap-2">
             {payments.length === 0 && (
-              <Button variant="outline" onClick={handleAddPayment} disabled={!amount}>
+              <Button variant="outline" onClick={handleAddPayment} disabled={!amount || !!validationError}>
                 Add Split Payment
               </Button>
             )}
             <Button
               onClick={handleCompleteSale}
-              disabled={createSale.isPending || (payments.length > 0 && remainingAmount > 0)}
+              disabled={!canCompleteSale}
             >
               {createSale.isPending ? 'Processing...' : 'Complete Sale'}
             </Button>

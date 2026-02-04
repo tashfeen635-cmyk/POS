@@ -1,4 +1,4 @@
-// Enhanced API Client with retry logic, offline detection, and comprehensive error handling
+// Enhanced API Client with retry logic, offline detection, circuit breaker, and comprehensive error handling
 import type { ApiResponse, ApiError, PaginatedResponse } from '@pos/shared';
 import { logger } from '../logging/logger';
 
@@ -6,8 +6,25 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Retry configuration
 const DEFAULT_RETRY_COUNT = 3;
+const SYNC_RETRY_COUNT = 1; // Reduced retries for sync endpoints
 const DEFAULT_RETRY_DELAY = 1000;
 const MAX_RETRY_DELAY = 30000;
+
+// 5xx errors that should be retried
+const RETRYABLE_STATUS_CODES = [502, 503, 504];
+
+// Circuit breaker configuration
+const CIRCUIT_BREAKER_THRESHOLD = 5; // failures before opening circuit
+const CIRCUIT_BREAKER_RESET_TIME = 60000; // 60 seconds
+
+// Circuit breaker state
+interface CircuitBreakerState {
+  failures: number;
+  lastFailure: number;
+  isOpen: boolean;
+}
+
+const circuitBreakers: Map<string, CircuitBreakerState> = new Map();
 
 // Error types for specific handling
 export class NetworkError extends Error {
@@ -52,11 +69,59 @@ interface RequestConfig extends RequestInit {
   timeout?: number;
 }
 
-interface QueuedRequest {
-  endpoint: string;
-  config: RequestConfig;
-  resolve: (value: any) => void;
-  reject: (reason?: any) => void;
+// Get circuit breaker key for an endpoint (group by base path)
+function getCircuitBreakerKey(endpoint: string): string {
+  // Group endpoints by their base path (e.g., /api/sync, /api/products)
+  const parts = endpoint.split('/').filter(Boolean);
+  if (parts.length >= 2) {
+    return `/${parts[0]}/${parts[1]}`;
+  }
+  return endpoint;
+}
+
+// Check if circuit is open for an endpoint
+function isCircuitOpen(endpoint: string): boolean {
+  const key = getCircuitBreakerKey(endpoint);
+  const state = circuitBreakers.get(key);
+
+  if (!state || !state.isOpen) return false;
+
+  // Check if reset time has passed
+  if (Date.now() - state.lastFailure > CIRCUIT_BREAKER_RESET_TIME) {
+    // Half-open: allow one request through
+    state.isOpen = false;
+    state.failures = 0;
+    return false;
+  }
+
+  return true;
+}
+
+// Record a failure for circuit breaker
+function recordCircuitFailure(endpoint: string): void {
+  const key = getCircuitBreakerKey(endpoint);
+  const state = circuitBreakers.get(key) || { failures: 0, lastFailure: 0, isOpen: false };
+
+  state.failures++;
+  state.lastFailure = Date.now();
+
+  if (state.failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    state.isOpen = true;
+    logger.warn(`Circuit breaker opened for ${key}`, { failures: state.failures });
+  }
+
+  circuitBreakers.set(key, state);
+}
+
+// Record a success for circuit breaker
+function recordCircuitSuccess(endpoint: string): void {
+  const key = getCircuitBreakerKey(endpoint);
+  const state = circuitBreakers.get(key);
+
+  if (state) {
+    state.failures = 0;
+    state.isOpen = false;
+  }
 }
 
 class ApiClient {
@@ -64,8 +129,6 @@ class ApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private onUnauthorized?: () => void;
-  private isRefreshing = false;
-  private refreshQueue: QueuedRequest[] = [];
   private requestId = 0;
 
   constructor(baseUrl: string) {
@@ -112,9 +175,13 @@ class ApiClient {
     endpoint: string,
     config: RequestConfig = {}
   ): Promise<T> {
+    // Determine if this is a sync endpoint (use reduced retries)
+    const isSyncEndpoint = endpoint.includes('/sync');
+    const defaultRetries = isSyncEndpoint ? SYNC_RETRY_COUNT : DEFAULT_RETRY_COUNT;
+
     const {
       params,
-      retries = DEFAULT_RETRY_COUNT,
+      retries = defaultRetries,
       retryDelay = DEFAULT_RETRY_DELAY,
       skipAuth = false,
       timeout = 30000,
@@ -123,6 +190,11 @@ class ApiClient {
 
     const reqId = ++this.requestId;
     const startTime = Date.now();
+
+    // Check circuit breaker
+    if (isCircuitOpen(endpoint)) {
+      throw new NetworkError(`Service temporarily unavailable (circuit breaker open for ${getCircuitBreakerKey(endpoint)})`);
+    }
 
     // Build URL with params
     let url = `${this.baseUrl}${endpoint}`;
@@ -193,7 +265,22 @@ class ApiClient {
           }
         }
 
-        return this.handleResponse<T>(response, reqId, startTime);
+        // Check for retryable 5xx errors before handleResponse
+        if (RETRYABLE_STATUS_CODES.includes(response.status) && attempt < retries) {
+          logger.debug(`API Request [${reqId}] got ${response.status}, will retry`, {
+            delay: attemptDelay,
+          });
+          await this.sleep(attemptDelay);
+          attemptDelay = Math.min(attemptDelay * 2, MAX_RETRY_DELAY);
+          continue;
+        }
+
+        const result = await this.handleResponse<T>(response, reqId, startTime, endpoint);
+
+        // Record success for circuit breaker
+        recordCircuitSuccess(endpoint);
+
+        return result;
       } catch (error) {
         lastError = error as Error;
 
@@ -207,14 +294,21 @@ class ApiClient {
           throw error;
         }
 
-        // Check if it's a network error or timeout
+        // Check if it's a network error, timeout, or retryable server error
         const isNetworkError =
           error instanceof TypeError ||
           (error as Error).name === 'AbortError' ||
           error instanceof NetworkError;
 
-        if (isNetworkError && attempt < retries) {
-          logger.warn(`API Request [${reqId}] failed, retrying (${attempt + 1}/${retries})`, {
+        const isRetryableServerError =
+          error instanceof ServerError &&
+          RETRYABLE_STATUS_CODES.includes((error as ServerError).statusCode);
+
+        const shouldRetry = (isNetworkError || isRetryableServerError) && attempt < retries;
+
+        if (shouldRetry) {
+          // Only log debug on intermediate retries (not warning)
+          logger.debug(`API Request [${reqId}] attempt ${attempt + 1} failed, will retry`, {
             error: (error as Error).message,
             delay: attemptDelay,
           });
@@ -224,8 +318,14 @@ class ApiClient {
           continue;
         }
 
-        // Log and rethrow
+        // Final failure - log error and record circuit breaker failure
         const duration = Date.now() - startTime;
+
+        if (isNetworkError || isRetryableServerError) {
+          recordCircuitFailure(endpoint);
+        }
+
+        // Only log on final failure
         logger.error(`API Request [${reqId}] failed after ${attempt + 1} attempts`, {
           endpoint,
           duration,
@@ -243,7 +343,7 @@ class ApiClient {
     throw lastError || new Error('Request failed');
   }
 
-  private async handleResponse<T>(response: Response, reqId: number, startTime: number): Promise<T> {
+  private async handleResponse<T>(response: Response, reqId: number, startTime: number, _endpoint?: string): Promise<T> {
     const duration = Date.now() - startTime;
     let data: any;
 
@@ -260,14 +360,18 @@ class ApiClient {
       const error = data as ApiError;
       const message = error?.error?.message || `Request failed with status ${response.status}`;
 
-      logger.warn(`API Response [${reqId}]`, {
-        status: response.status,
-        duration,
-        error: message,
-      });
+      // Only log errors that are not expected/handled
+      if (response.status >= 500) {
+        logger.warn(`API Response [${reqId}]`, {
+          status: response.status,
+          duration,
+          error: message,
+        });
+      }
 
       if (response.status === 400) {
-        throw new ValidationError(message, error?.error?.details || {});
+        const details = (error?.error?.details || {}) as Record<string, string[]>;
+        throw new ValidationError(message, details);
       }
 
       if (response.status === 401) {
@@ -297,46 +401,43 @@ class ApiClient {
     return data as T;
   }
 
+  private refreshPromise: Promise<boolean> | null = null;
+
   private async handleTokenRefresh(): Promise<boolean> {
-    // If already refreshing, queue this request
-    if (this.isRefreshing) {
-      return new Promise((resolve) => {
-        // Wait for refresh to complete
-        const checkInterval = setInterval(() => {
-          if (!this.isRefreshing) {
-            clearInterval(checkInterval);
-            resolve(!!this.accessToken);
-          }
-        }, 100);
-      });
+    // If already refreshing, return the existing promise (Promise-based queue)
+    if (this.refreshPromise) {
+      return this.refreshPromise;
     }
 
-    this.isRefreshing = true;
+    // Create a new refresh promise
+    this.refreshPromise = (async () => {
+      try {
+        logger.debug('Refreshing access token');
 
-    try {
-      logger.debug('Refreshing access token');
+        const response = await fetch(`${this.baseUrl}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: this.refreshToken }),
+        });
 
-      const response = await fetch(`${this.baseUrl}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: this.refreshToken }),
-      });
+        if (response.ok) {
+          const data = await response.json();
+          this.setTokens(data.data.accessToken, data.data.refreshToken);
+          logger.info('Token refresh successful');
+          return true;
+        }
 
-      if (response.ok) {
-        const data = await response.json();
-        this.setTokens(data.data.accessToken, data.data.refreshToken);
-        logger.info('Token refresh successful');
-        return true;
+        logger.warn('Token refresh failed', { status: response.status });
+        return false;
+      } catch (error) {
+        logger.error('Token refresh error', { error: (error as Error).message });
+        return false;
+      } finally {
+        this.refreshPromise = null;
       }
+    })();
 
-      logger.warn('Token refresh failed', { status: response.status });
-    } catch (error) {
-      logger.error('Token refresh error', { error: (error as Error).message });
-    } finally {
-      this.isRefreshing = false;
-    }
-
-    return false;
+    return this.refreshPromise;
   }
 
   private getClientId(): string {

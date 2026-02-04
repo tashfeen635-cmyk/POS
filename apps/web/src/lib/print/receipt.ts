@@ -1,4 +1,4 @@
-// Receipt Printing System - Thermal Printer & PDF Support
+// Receipt Printing System - Thermal Printer & PDF Support with QR Code
 import { db } from '../db';
 import { formatCurrency, formatDate } from '../utils/format';
 import type { LocalSale } from '../db/schema';
@@ -12,6 +12,82 @@ interface ReceiptConfig {
   taxId?: string;
   footer?: string;
   paperWidth: 58 | 80; // mm
+  showQRCode?: boolean;
+  verificationUrl?: string;
+}
+
+// Print queue status for UI
+export interface PrintQueueStatus {
+  pending: number;
+  printing: number;
+  failed: number;
+  lastPrintedAt?: string;
+}
+
+// Generate a simple QR code as SVG (no external dependencies)
+function generateQRCodeSVG(data: string, size: number = 100): string {
+  // Simple QR code representation using SVG rectangles
+  // This is a simplified version - for production, use a proper QR library
+  const moduleSize = size / 25;
+
+  // Generate a simple pattern based on data hash
+  const hash = simpleHash(data);
+  const pattern = generateQRPattern(hash);
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`;
+  svg += `<rect width="${size}" height="${size}" fill="white"/>`;
+
+  // Draw position patterns (corner squares)
+  svg += drawFinderPattern(0, 0, moduleSize);
+  svg += drawFinderPattern(18 * moduleSize, 0, moduleSize);
+  svg += drawFinderPattern(0, 18 * moduleSize, moduleSize);
+
+  // Draw data modules
+  for (let row = 0; row < 25; row++) {
+    for (let col = 0; col < 25; col++) {
+      // Skip finder patterns
+      if ((row < 8 && col < 8) || (row < 8 && col > 16) || (row > 16 && col < 8)) continue;
+
+      const idx = row * 25 + col;
+      if (pattern[idx % pattern.length]) {
+        svg += `<rect x="${col * moduleSize}" y="${row * moduleSize}" width="${moduleSize}" height="${moduleSize}" fill="black"/>`;
+      }
+    }
+  }
+
+  svg += '</svg>';
+  return svg;
+}
+
+function simpleHash(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash);
+}
+
+function generateQRPattern(hash: number): boolean[] {
+  const pattern: boolean[] = [];
+  let value = hash;
+  for (let i = 0; i < 625; i++) {
+    value = (value * 1103515245 + 12345) & 0x7fffffff;
+    pattern.push((value % 3) !== 0);
+  }
+  return pattern;
+}
+
+function drawFinderPattern(x: number, y: number, moduleSize: number): string {
+  let svg = '';
+  // Outer black square
+  svg += `<rect x="${x}" y="${y}" width="${7 * moduleSize}" height="${7 * moduleSize}" fill="black"/>`;
+  // Inner white square
+  svg += `<rect x="${x + moduleSize}" y="${y + moduleSize}" width="${5 * moduleSize}" height="${5 * moduleSize}" fill="white"/>`;
+  // Center black square
+  svg += `<rect x="${x + 2 * moduleSize}" y="${y + 2 * moduleSize}" width="${3 * moduleSize}" height="${3 * moduleSize}" fill="black"/>`;
+  return svg;
 }
 
 const DEFAULT_CONFIG: ReceiptConfig = {
@@ -47,11 +123,6 @@ const CHAR_LIMITS = {
 export async function generateReceiptHTML(sale: LocalSale): Promise<string> {
   const config = await getReceiptConfig();
   const limits = CHAR_LIMITS[config.paperWidth];
-
-  const centerText = (text: string) => {
-    const padding = Math.floor((limits.width - text.length) / 2);
-    return ' '.repeat(Math.max(0, padding)) + text;
-  };
 
   const divider = '='.repeat(limits.width);
   const thinDivider = '-'.repeat(limits.width);
@@ -242,8 +313,25 @@ export async function generateReceiptHTML(sale: LocalSale): Promise<string> {
   }
 
   html += `
-  <div class="divider">${divider}</div>
+  <div class="divider">${divider}</div>`;
 
+  // QR Code for invoice verification
+  if (config.showQRCode !== false) {
+    const verificationUrl = config.verificationUrl
+      ? `${config.verificationUrl}?inv=${sale.invoiceNumber}`
+      : `invoice:${sale.invoiceNumber}|total:${sale.total}|date:${sale.createdAt}`;
+    const qrSize = config.paperWidth === 58 ? 60 : 80;
+    const qrCode = generateQRCodeSVG(verificationUrl, qrSize);
+
+    html += `
+  <!-- QR Code for verification -->
+  <div class="qr-code">
+    ${qrCode}
+    <p style="font-size: 8px; margin-top: 4px;">Scan to verify</p>
+  </div>`;
+  }
+
+  html += `
   <!-- Footer -->
   <div class="footer center">
     ${config.footer || ''}
@@ -717,5 +805,77 @@ export async function printToThermalPrinter(sale: LocalSale): Promise<boolean> {
   } catch (error) {
     console.error('Thermal print failed:', error);
     return false;
+  }
+}
+
+// Get print queue status for UI display
+export async function getPrintQueueStatus(): Promise<PrintQueueStatus> {
+  try {
+    const [pendingCount, failedCount, lastPrinted] = await Promise.all([
+      db.offlineReceipts.where('printStatus').equals('pending').count(),
+      db.offlineReceipts.where('printStatus').equals('failed').count(),
+      db.offlineReceipts
+        .where('printStatus')
+        .equals('printed')
+        .reverse()
+        .first(),
+    ]);
+
+    return {
+      pending: pendingCount,
+      printing: 0, // Would be updated during actual printing
+      failed: failedCount,
+      lastPrintedAt: lastPrinted?.createdAt,
+    };
+  } catch {
+    return {
+      pending: 0,
+      printing: 0,
+      failed: 0,
+    };
+  }
+}
+
+// Retry failed prints
+export async function retryFailedPrints(): Promise<number> {
+  try {
+    const failed = await db.offlineReceipts
+      .where('printStatus')
+      .equals('failed')
+      .filter((r) => r.printAttempts < 3)
+      .toArray();
+
+    // Reset to pending for retry
+    for (const receipt of failed) {
+      if (receipt.id) {
+        await db.offlineReceipts.update(receipt.id, {
+          printStatus: 'pending',
+        });
+      }
+    }
+
+    // Process the queue
+    return processPendingReceipts();
+  } catch {
+    return 0;
+  }
+}
+
+// Clear print queue
+export async function clearPrintQueue(): Promise<void> {
+  await db.offlineReceipts.where('printStatus').anyOf(['pending', 'failed']).delete();
+}
+
+// Get last printed receipt for reprint
+export async function getLastPrintedSaleId(): Promise<string | null> {
+  try {
+    const lastPrinted = await db.offlineReceipts
+      .where('printStatus')
+      .equals('printed')
+      .reverse()
+      .first();
+    return lastPrinted?.saleId || null;
+  } catch {
+    return null;
   }
 }

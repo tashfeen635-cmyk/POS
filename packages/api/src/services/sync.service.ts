@@ -1,4 +1,4 @@
-import { eq, and, gt, sql } from 'drizzle-orm';
+import { eq, and, gt, sql, or } from 'drizzle-orm';
 import { getDb } from '../db/connection';
 import {
   products,
@@ -10,8 +10,10 @@ import {
   imeiInventory,
   productBatches,
   syncLogs,
+  inventoryLedger,
 } from '@pos/db/schema';
-import type { SyncRequestInput } from '@pos/shared';
+import type { SyncRequestInput, CreateSaleInput } from '@pos/shared';
+import * as saleService from './sale.service';
 
 interface SyncChange {
   table: string;
@@ -19,6 +21,11 @@ interface SyncChange {
   id: string;
   data?: Record<string, unknown>;
   serverTimestamp: string;
+}
+
+interface PaginationOptions {
+  limit: number;
+  cursor?: string;
 }
 
 export async function processSync(
@@ -51,7 +58,7 @@ export async function processSync(
       switch (table) {
         case 'sales':
           if (operation === 'create' && data) {
-            // Check if sale already exists (by offlineId)
+            // Check if sale already exists (by offlineId for idempotency)
             const [existing] = await db
               .select()
               .from(sales)
@@ -59,18 +66,91 @@ export async function processSync(
               .limit(1);
 
             if (!existing) {
-              // Process the sale creation
-              // This would be handled by sale.service.createSale
-              recordsCreated[table] = (recordsCreated[table] || 0) + 1;
+              // Create the sale using the sale service
+              try {
+                const saleInput = data as unknown as CreateSaleInput;
+                saleInput.offlineId = id; // Ensure offlineId is set
+
+                await saleService.createSale(organizationId, storeId, userId, saleInput);
+                recordsCreated[table] = (recordsCreated[table] || 0) + 1;
+              } catch (error) {
+                // Log but don't fail the entire sync
+                console.error(`Failed to create sale ${id}:`, error);
+                conflicts.push({
+                  table,
+                  id,
+                  clientData: data as Record<string, unknown>,
+                  serverData: {},
+                  resolution: 'manual',
+                });
+              }
             }
           }
           break;
 
         case 'customers':
           if (operation === 'create' && data) {
-            recordsCreated[table] = (recordsCreated[table] || 0) + 1;
+            // Check for duplicate
+            const [existing] = await db
+              .select()
+              .from(customers)
+              .where(
+                and(
+                  eq(customers.organizationId, organizationId),
+                  or(
+                    eq(customers.id, id),
+                    data.phone ? eq(customers.phone, data.phone as string) : sql`false`
+                  )
+                )
+              )
+              .limit(1);
+
+            if (!existing) {
+              await db.insert(customers).values({
+                id,
+                organizationId,
+                name: data.name as string,
+                phone: (data.phone as string) || null,
+                email: (data.email as string) || null,
+                address: (data.address as string) || null,
+                notes: (data.notes as string) || null,
+              });
+              recordsCreated[table] = (recordsCreated[table] || 0) + 1;
+            }
           } else if (operation === 'update' && data) {
-            recordsUpdated[table] = (recordsUpdated[table] || 0) + 1;
+            const [existing] = await db
+              .select()
+              .from(customers)
+              .where(and(eq(customers.id, id), eq(customers.organizationId, organizationId)))
+              .limit(1);
+
+            if (existing) {
+              // Check for conflict (server modified since client last synced)
+              const clientTimestamp = data.updatedAt ? new Date(data.updatedAt as string) : new Date(0);
+              if (existing.updatedAt > clientTimestamp) {
+                // Conflict - server wins for customers
+                conflicts.push({
+                  table,
+                  id,
+                  clientData: data as Record<string, unknown>,
+                  serverData: existing as unknown as Record<string, unknown>,
+                  resolution: 'server_wins',
+                });
+              } else {
+                await db
+                  .update(customers)
+                  .set({
+                    name: (data.name as string) || existing.name,
+                    phone: (data.phone as string) || existing.phone,
+                    email: (data.email as string) || existing.email,
+                    address: (data.address as string) || existing.address,
+                    notes: (data.notes as string) || existing.notes,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(customers.id, id));
+                recordsUpdated[table] = (recordsUpdated[table] || 0) + 1;
+              }
+            }
           }
           break;
 
@@ -252,11 +332,13 @@ export async function getLastSyncTime(
 export async function pullChanges(
   organizationId: string,
   storeId: string,
-  since: string | null
+  since: string | null,
+  options: PaginationOptions = { limit: 500 }
 ) {
   const db = getDb();
   const lastSyncedAt = since ? new Date(since) : new Date(0);
   const changes: SyncChange[] = [];
+  let nextCursor: string | undefined;
 
   // Get updated products
   const updatedProducts = await db
@@ -264,7 +346,8 @@ export async function pullChanges(
     .from(products)
     .where(
       and(eq(products.organizationId, organizationId), gt(products.updatedAt, lastSyncedAt))
-    );
+    )
+    .limit(options.limit);
 
   for (const product of updatedProducts) {
     changes.push({
@@ -282,7 +365,8 @@ export async function pullChanges(
     .from(categories)
     .where(
       and(eq(categories.organizationId, organizationId), gt(categories.updatedAt, lastSyncedAt))
-    );
+    )
+    .limit(options.limit);
 
   for (const category of updatedCategories) {
     changes.push({
@@ -300,7 +384,8 @@ export async function pullChanges(
     .from(customers)
     .where(
       and(eq(customers.organizationId, organizationId), gt(customers.updatedAt, lastSyncedAt))
-    );
+    )
+    .limit(options.limit);
 
   for (const customer of updatedCustomers) {
     changes.push({
@@ -322,7 +407,8 @@ export async function pullChanges(
         eq(imeiInventory.storeId, storeId),
         gt(imeiInventory.updatedAt, lastSyncedAt)
       )
-    );
+    )
+    .limit(options.limit);
 
   for (const imei of updatedIMEIs) {
     changes.push({
@@ -344,7 +430,8 @@ export async function pullChanges(
         eq(productBatches.storeId, storeId),
         gt(productBatches.updatedAt, lastSyncedAt)
       )
-    );
+    )
+    .limit(options.limit);
 
   for (const batch of updatedBatches) {
     changes.push({
@@ -356,9 +443,19 @@ export async function pullChanges(
     });
   }
 
+  // Check if we hit the limit (pagination needed)
+  const totalChanges = changes.length;
+  if (totalChanges >= options.limit) {
+    // Set cursor to the last timestamp for pagination
+    const lastChange = changes[changes.length - 1];
+    nextCursor = lastChange?.serverTimestamp;
+  }
+
   return {
     serverTimestamp: new Date().toISOString(),
     changes,
+    hasMore: !!nextCursor,
+    nextCursor,
   };
 }
 
@@ -376,6 +473,7 @@ export async function pushTableChanges(
     timestamp: string;
   }>
 ) {
+  const db = getDb();
   const processed: Array<{ clientId: string; serverId?: string; error?: string }> = [];
   const conflicts: Array<{
     clientId: string;
@@ -384,16 +482,154 @@ export async function pushTableChanges(
     resolution: 'client_wins' | 'server_wins' | 'manual';
   }> = [];
 
-  // For now, acknowledge all items as processed successfully
-  // In production, this would actually apply the changes to the database
   for (const item of items) {
     try {
-      // TODO: Implement actual table-specific sync logic
-      // For now, just acknowledge receipt
-      processed.push({
-        clientId: item.clientId,
-        serverId: item.clientId, // In real impl, might be a new server-generated ID
-      });
+      switch (table) {
+        case 'sales': {
+          if (item.operation === 'create' && item.data) {
+            // Check for duplicate by offlineId (idempotency)
+            const [existing] = await db
+              .select({ id: sales.id })
+              .from(sales)
+              .where(eq(sales.offlineId, item.clientId))
+              .limit(1);
+
+            if (existing) {
+              // Already processed, return existing ID
+              processed.push({
+                clientId: item.clientId,
+                serverId: existing.id,
+              });
+            } else {
+              // Create the sale
+              const saleInput = item.data as unknown as CreateSaleInput;
+              saleInput.offlineId = item.clientId;
+
+              const sale = await saleService.createSale(organizationId, storeId, userId, saleInput);
+              processed.push({
+                clientId: item.clientId,
+                serverId: sale?.id,
+              });
+            }
+          } else {
+            processed.push({
+              clientId: item.clientId,
+              error: `Operation ${item.operation} not supported for sales`,
+            });
+          }
+          break;
+        }
+
+        case 'customers': {
+          if (item.operation === 'create' && item.data) {
+            // Check for duplicate
+            const [existing] = await db
+              .select()
+              .from(customers)
+              .where(
+                and(
+                  eq(customers.organizationId, organizationId),
+                  or(
+                    eq(customers.id, item.clientId),
+                    item.data.phone ? eq(customers.phone, item.data.phone as string) : sql`false`
+                  )
+                )
+              )
+              .limit(1);
+
+            if (existing) {
+              // Already exists - might be a conflict
+              if (existing.id !== item.clientId) {
+                conflicts.push({
+                  clientId: item.clientId,
+                  clientData: item.data,
+                  serverData: existing as unknown as Record<string, unknown>,
+                  resolution: 'server_wins',
+                });
+              }
+              processed.push({
+                clientId: item.clientId,
+                serverId: existing.id,
+              });
+            } else {
+              const [created] = await db
+                .insert(customers)
+                .values({
+                  id: item.clientId,
+                  organizationId,
+                  name: item.data.name as string,
+                  phone: (item.data.phone as string) || null,
+                  email: (item.data.email as string) || null,
+                  address: (item.data.address as string) || null,
+                  notes: (item.data.notes as string) || null,
+                })
+                .returning({ id: customers.id });
+
+              processed.push({
+                clientId: item.clientId,
+                serverId: created.id,
+              });
+            }
+          } else if (item.operation === 'update' && item.data) {
+            const [existing] = await db
+              .select()
+              .from(customers)
+              .where(and(eq(customers.id, item.clientId), eq(customers.organizationId, organizationId)))
+              .limit(1);
+
+            if (existing) {
+              // Check for conflict
+              const clientTimestamp = new Date(item.timestamp);
+              if (existing.updatedAt > clientTimestamp) {
+                conflicts.push({
+                  clientId: item.clientId,
+                  clientData: item.data,
+                  serverData: existing as unknown as Record<string, unknown>,
+                  resolution: 'server_wins',
+                });
+                processed.push({
+                  clientId: item.clientId,
+                  serverId: existing.id,
+                });
+              } else {
+                await db
+                  .update(customers)
+                  .set({
+                    name: (item.data.name as string) || existing.name,
+                    phone: (item.data.phone as string) || existing.phone,
+                    email: (item.data.email as string) || existing.email,
+                    address: (item.data.address as string) || existing.address,
+                    notes: (item.data.notes as string) || existing.notes,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(customers.id, item.clientId));
+
+                processed.push({
+                  clientId: item.clientId,
+                  serverId: item.clientId,
+                });
+              }
+            } else {
+              processed.push({
+                clientId: item.clientId,
+                error: 'Customer not found',
+              });
+            }
+          } else {
+            processed.push({
+              clientId: item.clientId,
+              error: `Operation ${item.operation} not supported`,
+            });
+          }
+          break;
+        }
+
+        default:
+          processed.push({
+            clientId: item.clientId,
+            error: `Table ${table} not supported for sync`,
+          });
+      }
     } catch (error) {
       processed.push({
         clientId: item.clientId,
@@ -403,7 +639,7 @@ export async function pushTableChanges(
   }
 
   return {
-    success: true,
+    success: processed.every((p) => !p.error),
     processed,
     conflicts,
   };

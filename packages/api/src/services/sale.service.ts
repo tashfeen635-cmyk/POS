@@ -12,6 +12,7 @@ import {
   inventoryLedger,
 } from '@pos/db/schema';
 import type { CreateSaleInput, SaleFilterInput } from '@pos/shared';
+import { InsufficientStockError, NotFoundError } from '../errors';
 
 export async function getSales(
   organizationId: string,
@@ -103,6 +104,9 @@ export async function createSale(
 ) {
   const db = getDb();
 
+  // PHASE 1: Validate stock availability BEFORE any changes
+  await validateStockAvailability(db, organizationId, storeId, input.items);
+
   // Generate invoice number
   const today = new Date();
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
@@ -135,7 +139,7 @@ export async function createSale(
       .limit(1);
 
     if (!product) {
-      throw new Error(`Product not found: ${item.productId}`);
+      throw new NotFoundError('Product', item.productId);
     }
 
     const itemSubtotal = item.unitPrice * item.quantity;
@@ -356,4 +360,81 @@ export async function getRecentSales(
     .where(and(eq(sales.organizationId, organizationId), eq(sales.storeId, storeId)))
     .orderBy(desc(sales.createdAt))
     .limit(limit);
+}
+
+// Validate stock availability before creating a sale
+async function validateStockAvailability(
+  db: ReturnType<typeof getDb>,
+  organizationId: string,
+  storeId: string,
+  items: Array<{
+    productId: string;
+    imeiId?: string | null;
+    batchId?: string | null;
+    quantity: number;
+  }>
+): Promise<void> {
+  for (const item of items) {
+    // Check IMEI availability
+    if (item.imeiId) {
+      const [imei] = await db
+        .select()
+        .from(imeiInventory)
+        .where(
+          and(
+            eq(imeiInventory.id, item.imeiId),
+            eq(imeiInventory.organizationId, organizationId),
+            eq(imeiInventory.storeId, storeId)
+          )
+        )
+        .limit(1);
+
+      if (!imei) {
+        throw new NotFoundError('IMEI', item.imeiId);
+      }
+
+      if (imei.status !== 'available') {
+        throw new InsufficientStockError(item.productId, 1, 0);
+      }
+    }
+    // Check batch quantity
+    else if (item.batchId) {
+      const [batch] = await db
+        .select()
+        .from(productBatches)
+        .where(
+          and(
+            eq(productBatches.id, item.batchId),
+            eq(productBatches.organizationId, organizationId),
+            eq(productBatches.storeId, storeId)
+          )
+        )
+        .limit(1);
+
+      if (!batch) {
+        throw new NotFoundError('Batch', item.batchId);
+      }
+
+      const availableQuantity = batch.quantity - batch.soldQuantity;
+      if (availableQuantity < item.quantity) {
+        throw new InsufficientStockError(item.productId, item.quantity, availableQuantity);
+      }
+    }
+    // Check product stock
+    else {
+      const [product] = await db
+        .select()
+        .from(products)
+        .where(eq(products.id, item.productId))
+        .limit(1);
+
+      if (!product) {
+        throw new NotFoundError('Product', item.productId);
+      }
+
+      if (product.trackInventory && product.stockQuantity < item.quantity) {
+        throw new InsufficientStockError(item.productId, item.quantity, product.stockQuantity);
+      }
+    }
+  }
 }

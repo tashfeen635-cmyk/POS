@@ -4,28 +4,49 @@ import type { SyncQueueItem } from '../db/schema';
 import { api, AuthenticationError } from '../api/client';
 import { useUIStore } from '@/stores/ui.store';
 import { useAuthStore } from '@/stores/auth.store';
+import { logger } from '../logging/logger';
+
+// Create a child logger for sync operations
+const syncLogger = logger.child({ module: 'sync' });
 
 // Constants
 const SYNC_INTERVAL = 30000; // 30 seconds
+const MAX_SYNC_INTERVAL = 300000; // 5 minutes (when backing off)
 const MAX_BATCH_SIZE = 50;
 const BASE_RETRY_DELAY = 1000; // 1 second
 const MAX_RETRY_DELAY = 300000; // 5 minutes
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
+let consecutiveErrors = 0;
+let currentSyncInterval = SYNC_INTERVAL;
+
+// Sync status event emitter
+type SyncEventType = 'sync_start' | 'sync_complete' | 'sync_error' | 'sync_progress';
+type SyncEventCallback = (event: { type: SyncEventType; data?: any }) => void;
+const syncEventListeners: SyncEventCallback[] = [];
+
+export function onSyncEvent(callback: SyncEventCallback): () => void {
+  syncEventListeners.push(callback);
+  return () => {
+    const index = syncEventListeners.indexOf(callback);
+    if (index > -1) syncEventListeners.splice(index, 1);
+  };
+}
+
+function emitSyncEvent(type: SyncEventType, data?: any): void {
+  syncEventListeners.forEach((cb) => cb({ type, data }));
+}
 
 // Initialize sync engine
 export async function startSyncEngine() {
-  console.log('[Sync] Starting sync engine...');
+  syncLogger.info('Starting sync engine');
 
   // Perform initial sync
   await performSync();
 
-  // Set up periodic sync
-  if (syncInterval) {
-    clearInterval(syncInterval);
-  }
-  syncInterval = setInterval(performSync, SYNC_INTERVAL);
+  // Set up periodic sync with dynamic interval
+  scheduleNextSync();
 
   // Listen for online events
   window.addEventListener('online', handleOnline);
@@ -34,11 +55,45 @@ export async function startSyncEngine() {
   // Listen for visibility changes (sync when tab becomes visible)
   document.addEventListener('visibilitychange', handleVisibilityChange);
 
-  console.log('[Sync] Sync engine started');
+  syncLogger.info('Sync engine started');
+}
+
+// Schedule next sync with dynamic interval based on error rate
+function scheduleNextSync() {
+  if (syncInterval) {
+    clearInterval(syncInterval);
+  }
+  syncInterval = setInterval(performSync, currentSyncInterval);
+}
+
+// Adjust sync interval based on consecutive errors (backoff)
+function adjustSyncInterval(hadError: boolean) {
+  if (hadError) {
+    consecutiveErrors++;
+    // Increase interval exponentially on errors (up to max)
+    currentSyncInterval = Math.min(
+      SYNC_INTERVAL * Math.pow(2, consecutiveErrors),
+      MAX_SYNC_INTERVAL
+    );
+    syncLogger.debug('Sync backoff increased', {
+      consecutiveErrors,
+      newInterval: currentSyncInterval,
+    });
+  } else {
+    // Reset on success
+    if (consecutiveErrors > 0) {
+      syncLogger.debug('Sync backoff reset after success');
+    }
+    consecutiveErrors = 0;
+    currentSyncInterval = SYNC_INTERVAL;
+  }
+
+  // Reschedule with new interval
+  scheduleNextSync();
 }
 
 export function stopSyncEngine() {
-  console.log('[Sync] Stopping sync engine...');
+  syncLogger.info('Stopping sync engine');
 
   if (syncInterval) {
     clearInterval(syncInterval);
@@ -49,30 +104,37 @@ export function stopSyncEngine() {
   window.removeEventListener('offline', handleOffline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 
-  console.log('[Sync] Sync engine stopped');
+  syncLogger.info('Sync engine stopped');
 }
 
 function handleOnline() {
-  console.log('[Sync] Network online - triggering sync');
+  syncLogger.info('Network online - triggering sync');
   useUIStore.getState().setOnline(true);
+  // Reset backoff when coming online
+  consecutiveErrors = 0;
+  currentSyncInterval = SYNC_INTERVAL;
   performSync();
 }
 
 function handleOffline() {
-  console.log('[Sync] Network offline');
+  syncLogger.info('Network offline');
   useUIStore.getState().setOnline(false);
 }
 
 function handleVisibilityChange() {
   if (document.visibilityState === 'visible') {
-    console.log('[Sync] Tab visible - checking for sync');
+    syncLogger.debug('Tab visible - checking for sync');
     performSync();
   }
 }
 
-// Check if user is authenticated
+// Check if user is authenticated and auth is not loading
 function isAuthenticated(): boolean {
-  const { isAuthenticated: authenticated, user } = useAuthStore.getState();
+  const { isAuthenticated: authenticated, user, isLoading } = useAuthStore.getState();
+  // Skip if auth is still loading
+  if (isLoading) {
+    return false;
+  }
   // Also check if API client has a token
   return !!(authenticated && user && api.isAuthenticated());
 }
@@ -93,6 +155,9 @@ export async function performSync(): Promise<void> {
 
   isSyncing = true;
   setSyncing(true);
+  emitSyncEvent('sync_start');
+
+  let hadError = false;
 
   try {
     // Process sync queue first (push local changes)
@@ -105,12 +170,16 @@ export async function performSync(): Promise<void> {
     const status = await getSyncStatus();
     setPendingSyncCount(status.totalPending);
 
-    console.log('[Sync] Sync completed successfully');
+    syncLogger.debug('Sync completed successfully');
+    emitSyncEvent('sync_complete', { pendingCount: status.totalPending });
   } catch (error) {
-    console.error('[Sync] Sync failed:', error);
+    hadError = true;
+    syncLogger.error('Sync failed', { error: (error as Error).message });
+    emitSyncEvent('sync_error', { error: (error as Error).message });
   } finally {
     isSyncing = false;
     setSyncing(false);
+    adjustSyncInterval(hadError);
   }
 }
 
@@ -143,7 +212,7 @@ async function processSyncQueue(): Promise<void> {
 
   // Process in batches
   const batch = pendingItems.slice(0, MAX_BATCH_SIZE);
-  console.log(`[Sync] Processing ${batch.length} items from sync queue`);
+  syncLogger.debug(`Processing ${batch.length} items from sync queue`);
 
   // Group by table for efficient processing
   const groupedByTable = batch.reduce(
@@ -223,13 +292,13 @@ async function processTableSync(table: string, items: SyncQueueItem[]): Promise<
   } catch (error) {
     // Silently ignore auth errors - user may not be logged in yet
     if (error instanceof AuthenticationError) {
-      console.debug(`[Sync] Sync skipped for ${table} - not authenticated`);
+      syncLogger.debug(`Sync skipped for ${table} - not authenticated`);
       // Reset items back to pending (not failed) so they can sync after login
       await db.syncQueue.where('id').anyOf(itemIds).modify({ status: 'pending' });
       return;
     }
 
-    console.error(`[Sync] Failed to sync ${table}:`, error);
+    syncLogger.error(`Failed to sync ${table}`, { error: error instanceof Error ? error.message : 'Unknown error' });
 
     // Mark all items in batch as failed
     for (const item of items) {
@@ -255,7 +324,7 @@ async function handleSyncFailure(item: SyncQueueItem, error: string): Promise<vo
       nextRetryAt: null, // No more retries
     });
 
-    console.error(`[Sync] Item ${item.recordId} permanently failed after ${newAttempts} attempts`);
+    syncLogger.error(`Item ${item.recordId} permanently failed after ${newAttempts} attempts`);
     return;
   }
 
@@ -271,9 +340,9 @@ async function handleSyncFailure(item: SyncQueueItem, error: string): Promise<vo
     nextRetryAt,
   });
 
-  console.log(
-    `[Sync] Item ${item.recordId} failed, retry ${newAttempts}/${item.maxAttempts} scheduled for ${nextRetryAt}`
-  );
+  syncLogger.debug(`Item ${item.recordId} failed, retry ${newAttempts}/${item.maxAttempts} scheduled`, {
+    nextRetryAt,
+  });
 }
 
 // Handle sync conflict
@@ -286,7 +355,7 @@ async function handleConflict(
     resolution: 'client_wins' | 'server_wins' | 'manual';
   }
 ): Promise<void> {
-  console.log(`[Sync] Conflict detected for ${table}/${conflict.clientId}: ${conflict.resolution}`);
+  syncLogger.info(`Conflict detected for ${table}/${conflict.clientId}`, { resolution: conflict.resolution });
 
   switch (conflict.resolution) {
     case 'server_wins':
@@ -327,14 +396,14 @@ async function pullChanges(): Promise<void> {
         id: string;
         data?: Record<string, unknown>;
       }>;
-    }>('/api/sync/pull', {
-      params: { since: lastSyncTime || undefined },
-      retries: 0, // Don't retry sync - will try again on next sync cycle
-    });
+    }>('/api/sync/pull',
+      lastSyncTime ? { since: lastSyncTime } : undefined,
+      { retries: 0 } // Don't retry sync - will try again on next sync cycle
+    );
 
     if (!response.data) return;
 
-    console.log(`[Sync] Pulling ${response.data.changes.length} changes from server`);
+    syncLogger.debug(`Pulling ${response.data.changes.length} changes from server`);
 
     // Apply changes in transaction
     await db.transaction('rw', [db.products, db.categories, db.customers, db.imeiInventory, db.productBatches, db.sales], async () => {
@@ -348,10 +417,10 @@ async function pullChanges(): Promise<void> {
   } catch (error) {
     // Silently ignore auth errors - user may not be logged in yet
     if (error instanceof AuthenticationError) {
-      console.debug('[Sync] Pull skipped - not authenticated');
+      syncLogger.debug('Pull skipped - not authenticated');
       return;
     }
-    console.error('[Sync] Pull failed:', error);
+    syncLogger.error('Pull failed', { error: error instanceof Error ? error.message : 'Unknown error' });
   }
 }
 
@@ -377,7 +446,7 @@ async function applyServerChange(change: {
 
   const dbTable = tableMap[table];
   if (!dbTable) {
-    console.warn(`[Sync] Unknown table: ${table}`);
+    syncLogger.warn(`Unknown table: ${table}`);
     return;
   }
 
@@ -393,7 +462,7 @@ async function applyServerChange(change: {
         const existing = await dbTable.get(id);
         if (existing && existing._syncStatus === SYNC_STATUS.PENDING) {
           // Local has pending changes - this is a conflict
-          console.warn(`[Sync] Conflict: local pending changes for ${table}/${id}`);
+          syncLogger.warn(`Conflict: local pending changes for ${table}/${id}`);
           // For now, server wins - could be configurable
         }
 
@@ -505,11 +574,11 @@ async function markRecordConflict(
 }
 
 // Force sync a specific record
-export async function forceSyncRecord(table: string, id: string): Promise<boolean> {
+export async function forceSyncRecord(_table: string, id: string): Promise<boolean> {
   const { isOnline } = useUIStore.getState();
 
   if (!isOnline) {
-    console.warn('[Sync] Cannot force sync while offline');
+    syncLogger.warn('Cannot force sync while offline');
     return false;
   }
 
