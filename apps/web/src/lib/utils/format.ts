@@ -2,12 +2,17 @@
 export { formatCurrency as formatCurrencyFull, formatDate, formatDateTime, formatNumber } from '@pos/shared';
 
 // Currency formatter with optional compact mode for receipts
-export function formatCurrency(value: number, showSymbol: boolean = true): string {
+export function formatCurrency(value: string | number | null | undefined, showSymbol: boolean = true): string {
+  if (value === null || value === undefined) return showSymbol ? 'Rs. 0' : '0';
+
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(numValue)) return showSymbol ? 'Rs. 0' : '0';
+
   const formatted = new Intl.NumberFormat('en-PK', {
     style: 'decimal',
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(value);
+  }).format(numValue);
 
   return showSymbol ? `Rs. ${formatted}` : formatted;
 }

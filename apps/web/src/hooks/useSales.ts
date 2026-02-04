@@ -93,8 +93,8 @@ export function useCreateSale() {
           product: {
             id: item.product.id,
             name: item.product.name,
-            costPrice: item.product.costPrice,
-            taxRate: item.product.taxRate || '0',
+            costPrice: String(item.product.costPrice),
+            taxRate: String(item.product.taxRate || 0),
           },
           imei: item.imei ? { id: item.imei.id, imei1: item.imei.imei1 } : null,
           batch: item.batch ? { id: item.batch.id, batchNumber: item.batch.batchNumber } : null,

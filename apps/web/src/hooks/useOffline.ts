@@ -4,7 +4,7 @@ import { getSyncStatus } from '@/lib/db';
 
 export function useOffline() {
   const { isOnline, isSyncing, pendingSyncCount, setOnline, setPendingSyncCount } = useUIStore();
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [lastSyncTime, _setLastSyncTime] = useState<Date | null>(null);
 
   useEffect(() => {
     // Update sync status periodically

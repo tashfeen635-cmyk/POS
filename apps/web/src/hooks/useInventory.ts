@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
-import { db } from '@/lib/db';
+import { db, createSyncedMetadata } from '@/lib/db';
 import { useUIStore } from '@/stores/ui.store';
 import type {
   IMEIInventory,
@@ -21,7 +21,7 @@ export function useIMEIInventory(filters: IMEIFilterInput = { page: 1, limit: 50
       if (isOnline) {
         const response = await api.getPaginated<IMEIInventory>('/api/inventory/imei', filters as Record<string, string | number | boolean>);
         if (response.data) {
-          await db.imeiInventory.bulkPut(response.data.map(i => ({ ...i, _syncStatus: 'synced' as const })));
+          await db.imeiInventory.bulkPut(response.data.map(i => ({ ...i, ...createSyncedMetadata() })));
         }
         return response;
       } else {
@@ -89,7 +89,7 @@ export function useBatches(filters: BatchFilterInput = { page: 1, limit: 50 }) {
       if (isOnline) {
         const response = await api.getPaginated<ProductBatch>('/api/inventory/batches', filters as Record<string, string | number | boolean>);
         if (response.data) {
-          await db.productBatches.bulkPut(response.data.map(b => ({ ...b, _syncStatus: 'synced' as const })));
+          await db.productBatches.bulkPut(response.data.map(b => ({ ...b, ...createSyncedMetadata() })));
         }
         return response;
       } else {

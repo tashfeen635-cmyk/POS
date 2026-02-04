@@ -14,12 +14,15 @@ import { IMEISelector } from '@/components/pos/IMEISelector';
 import { BatchSelector } from '@/components/pos/BatchSelector';
 import { IMEI_TRACKED_TYPES, BATCH_TRACKED_TYPES } from '@pos/shared';
 import type { Product } from '@pos/shared';
+import type { LocalProduct } from '@/lib/db/schema';
+
+type ProductLike = Product | LocalProduct;
 
 export function POSPage() {
   const [search, setSearch] = useState('');
   const [showPayment, setShowPayment] = useState(false);
   const [showCustomer, setShowCustomer] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<ProductLike | null>(null);
   const [showIMEISelector, setShowIMEISelector] = useState(false);
   const [showBatchSelector, setShowBatchSelector] = useState(false);
 
@@ -46,7 +49,7 @@ export function POSPage() {
 
   const products = productsData?.data || [];
 
-  const handleProductClick = (product: Product) => {
+  const handleProductClick = (product: ProductLike) => {
     // Check if product needs IMEI selection
     if (IMEI_TRACKED_TYPES.includes(product.productType as any)) {
       setSelectedProduct(product);
@@ -115,7 +118,7 @@ export function POSPage() {
                   <CardContent className="p-3">
                     <h3 className="font-medium text-sm line-clamp-2">{product.name}</h3>
                     <p className="text-lg font-bold mt-1">
-                      {formatCurrency(parseFloat(product.salePrice))}
+                      {formatCurrency(product.salePrice)}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Stock: {product.stockQuantity}
@@ -257,7 +260,7 @@ export function POSPage() {
           <IMEISelector
             open={showIMEISelector}
             onOpenChange={setShowIMEISelector}
-            product={selectedProduct}
+            product={selectedProduct as Product}
             onSelect={(imei) => {
               addItem(selectedProduct, 1, imei);
               setShowIMEISelector(false);
@@ -267,7 +270,7 @@ export function POSPage() {
           <BatchSelector
             open={showBatchSelector}
             onOpenChange={setShowBatchSelector}
-            product={selectedProduct}
+            product={selectedProduct as Product}
             onSelect={(batch, qty) => {
               addItem(selectedProduct, qty, undefined, batch);
               setShowBatchSelector(false);

@@ -129,13 +129,13 @@ export function BatchesPage() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Cost</span>
-                      <span>{formatCurrency(parseFloat(batch.costPrice))}</span>
+                      <span>{formatCurrency(batch.costPrice)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Sale Price</span>
                       <span className="font-medium">
                         {batch.salePrice
-                          ? formatCurrency(parseFloat(batch.salePrice))
+                          ? formatCurrency(batch.salePrice)
                           : '-'}
                       </span>
                     </div>

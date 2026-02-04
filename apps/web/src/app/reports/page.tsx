@@ -12,7 +12,7 @@ export function ReportsPage() {
   const { data: customersWithCredit } = useCustomersWithCredit();
 
   const totalCredit = (customersWithCredit || []).reduce(
-    (sum, c) => sum + parseFloat(c.currentBalance),
+    (sum, c) => sum + Number(c.currentBalance),
     0
   );
 
@@ -132,7 +132,7 @@ export function ReportsPage() {
                       <p className="text-sm text-muted-foreground">{customer.phone}</p>
                     </div>
                     <p className="font-bold text-destructive">
-                      {formatCurrency(parseFloat(customer.currentBalance))}
+                      {formatCurrency(customer.currentBalance)}
                     </p>
                   </div>
                 ))}

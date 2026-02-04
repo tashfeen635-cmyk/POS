@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, Filter } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,10 +93,10 @@ export function ProductsPage() {
                   <div className="flex justify-between items-end">
                     <div>
                       <p className="text-lg font-bold">
-                        {formatCurrency(parseFloat(product.salePrice))}
+                        {formatCurrency(product.salePrice)}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Cost: {formatCurrency(parseFloat(product.costPrice))}
+                        Cost: {formatCurrency(product.costPrice)}
                       </p>
                     </div>
                     <div className="text-right">

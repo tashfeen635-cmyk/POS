@@ -16,6 +16,9 @@ import { formatCurrency, formatPhone } from '@/lib/utils/format';
 import { toast } from '@/components/ui/toaster';
 import { useForm } from 'react-hook-form';
 import type { Customer, CreateCustomerInput } from '@pos/shared';
+import type { LocalCustomer } from '@/lib/db/schema';
+
+type CustomerLike = Customer | LocalCustomer;
 
 interface CustomerSelectorProps {
   open: boolean;
@@ -141,11 +144,11 @@ export function CustomerSelector({ open, onOpenChange, onSelect }: CustomerSelec
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
               </div>
             ) : (
-              customers.map((customer) => (
+              customers.map((customer: CustomerLike) => (
                 <div
                   key={customer.id}
                   className="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-muted"
-                  onClick={() => onSelect(customer)}
+                  onClick={() => onSelect(customer as Customer)}
                 >
                   <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
                     <span className="text-sm font-medium text-primary">
@@ -158,9 +161,9 @@ export function CustomerSelector({ open, onOpenChange, onSelect }: CustomerSelec
                       {formatPhone(customer.phone) || 'No phone'}
                     </p>
                   </div>
-                  {parseFloat(customer.currentBalance) > 0 && (
+                  {Number(customer.currentBalance) > 0 && (
                     <span className="text-sm text-destructive">
-                      {formatCurrency(parseFloat(customer.currentBalance))}
+                      {formatCurrency(customer.currentBalance)}
                     </span>
                   )}
                 </div>

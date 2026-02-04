@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Search, Receipt, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { useSales } from '@/hooks/useSales';
 import { formatCurrency, formatDateTime } from '@/lib/utils/format';
 import {
@@ -105,10 +105,10 @@ export function SalesPage() {
                         {formatDateTime(sale.createdAt)}
                       </td>
                       <td className="p-4 font-medium">
-                        {formatCurrency(parseFloat(sale.total))}
+                        {formatCurrency(sale.total)}
                       </td>
                       <td className="p-4">
-                        {formatCurrency(parseFloat(sale.paidAmount))}
+                        {formatCurrency(sale.paidAmount)}
                       </td>
                       <td className="p-4">
                         <span
@@ -167,39 +167,39 @@ export function SalesPage() {
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatCurrency(parseFloat(selectedSale.subtotal))}</span>
+                  <span>{formatCurrency(selectedSale.subtotal)}</span>
                 </div>
-                {parseFloat(selectedSale.discount) > 0 && (
+                {Number(selectedSale.discount) > 0 && (
                   <div className="flex justify-between text-destructive">
                     <span>Discount</span>
-                    <span>-{formatCurrency(parseFloat(selectedSale.discount))}</span>
+                    <span>-{formatCurrency(selectedSale.discount)}</span>
                   </div>
                 )}
-                {parseFloat(selectedSale.taxAmount) > 0 && (
+                {Number(selectedSale.taxAmount) > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Tax</span>
-                    <span>{formatCurrency(parseFloat(selectedSale.taxAmount))}</span>
+                    <span>{formatCurrency(selectedSale.taxAmount)}</span>
                   </div>
                 )}
                 <Separator />
                 <div className="flex justify-between font-bold">
                   <span>Total</span>
-                  <span>{formatCurrency(parseFloat(selectedSale.total))}</span>
+                  <span>{formatCurrency(selectedSale.total)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Paid</span>
-                  <span>{formatCurrency(parseFloat(selectedSale.paidAmount))}</span>
+                  <span>{formatCurrency(selectedSale.paidAmount)}</span>
                 </div>
-                {parseFloat(selectedSale.dueAmount) > 0 && (
+                {Number(selectedSale.dueAmount) > 0 && (
                   <div className="flex justify-between text-destructive">
                     <span>Due</span>
-                    <span>{formatCurrency(parseFloat(selectedSale.dueAmount))}</span>
+                    <span>{formatCurrency(selectedSale.dueAmount)}</span>
                   </div>
                 )}
-                {parseFloat(selectedSale.changeAmount) > 0 && (
+                {Number(selectedSale.changeAmount) > 0 && (
                   <div className="flex justify-between text-success">
                     <span>Change</span>
-                    <span>{formatCurrency(parseFloat(selectedSale.changeAmount))}</span>
+                    <span>{formatCurrency(selectedSale.changeAmount)}</span>
                   </div>
                 )}
               </div>

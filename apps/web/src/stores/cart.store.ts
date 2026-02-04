@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import type { Product, Customer, IMEIInventory, ProductBatch, CartItem, CartPayment } from '@pos/shared';
+import type { LocalProduct } from '@/lib/db/schema';
+
+type ProductLike = Product | LocalProduct;
 
 interface CartState {
   items: CartItem[];
@@ -20,7 +23,7 @@ interface CartState {
   changeAmount: number;
 
   // Actions
-  addItem: (product: Product, quantity?: number, imei?: IMEIInventory, batch?: ProductBatch) => void;
+  addItem: (product: ProductLike, quantity?: number, imei?: IMEIInventory, batch?: ProductBatch) => void;
   updateItemQuantity: (itemId: string, quantity: number) => void;
   updateItemDiscount: (itemId: string, discount: number, isPercent?: boolean) => void;
   removeItem: (itemId: string) => void;
@@ -93,7 +96,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (imei) {
       const newItem: CartItem = {
         id: nanoid(),
-        product,
+        product: product as Product,
         imei,
         quantity: 1, // IMEI items always have quantity 1
         unitPrice: parseFloat(imei.salePrice || String(product.salePrice)),
@@ -130,7 +133,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
       const newItem: CartItem = {
         id: nanoid(),
-        product,
+        product: product as Product,
         batch,
         quantity,
         unitPrice: parseFloat(batch.salePrice || String(product.salePrice)),
@@ -166,7 +169,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     const newItem: CartItem = {
       id: nanoid(),
-      product,
+      product: product as Product,
       quantity,
       unitPrice: parseFloat(String(product.salePrice)),
       discount: 0,

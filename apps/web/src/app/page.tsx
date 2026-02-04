@@ -119,7 +119,7 @@ export function DashboardPage() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-medium">{formatCurrency(parseFloat(sale.total))}</p>
+                      <p className="font-medium">{formatCurrency(sale.total)}</p>
                       <p className="text-sm text-muted-foreground capitalize">
                         {sale.status}
                       </p>

@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select';
 import { useProduct, useCreateProduct, useUpdateProduct, useCategories } from '@/hooks/useProducts';
 import { toast } from '@/components/ui/toaster';
-import { PRODUCT_TYPES, PRODUCT_TYPE_LABELS } from '@pos/shared';
+import { PRODUCT_TYPE_LABELS } from '@pos/shared';
 import type { CreateProductInput } from '@pos/shared';
 
 export function ProductFormPage() {
@@ -59,10 +59,10 @@ export function ProductFormPage() {
         barcode: product.barcode || undefined,
         categoryId: product.categoryId || undefined,
         productType: product.productType as CreateProductInput['productType'],
-        costPrice: parseFloat(product.costPrice),
-        salePrice: parseFloat(product.salePrice),
-        wholesalePrice: product.wholesalePrice ? parseFloat(product.wholesalePrice) : undefined,
-        minSalePrice: product.minSalePrice ? parseFloat(product.minSalePrice) : undefined,
+        costPrice: Number(product.costPrice),
+        salePrice: Number(product.salePrice),
+        wholesalePrice: product.wholesalePrice ? Number(product.wholesalePrice) : undefined,
+        minSalePrice: product.minSalePrice ? Number(product.minSalePrice) : undefined,
         stockQuantity: product.stockQuantity,
         minStockLevel: product.minStockLevel,
         maxStockLevel: product.maxStockLevel || undefined,
@@ -82,7 +82,7 @@ export function ProductFormPage() {
         isActive: product.isActive,
         trackInventory: product.trackInventory,
         allowDiscount: product.allowDiscount,
-        taxRate: parseFloat(product.taxRate),
+        taxRate: Number(product.taxRate),
         description: product.description || undefined,
         notes: product.notes || undefined,
       });

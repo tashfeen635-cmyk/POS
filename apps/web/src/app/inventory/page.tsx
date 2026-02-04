@@ -1,10 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Smartphone, Package, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { useLowStockProducts } from '@/hooks/useProducts';
 import { useExpiryAlerts } from '@/hooks/useInventory';
-import { formatCurrency } from '@/lib/utils/format';
 
 export function InventoryPage() {
   const { data: lowStockProducts } = useLowStockProducts();

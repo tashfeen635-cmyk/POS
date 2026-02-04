@@ -25,6 +25,38 @@ export interface SyncMetadata {
   _version: number; // For optimistic locking
 }
 
+// Helper to create default sync metadata for synced items from server
+export function createSyncedMetadata(): SyncMetadata {
+  const now = new Date().toISOString();
+  return {
+    _syncStatus: SYNC_STATUS.SYNCED,
+    _clientId: localStorage.getItem('clientId') || '',
+    _clientCreatedAt: now,
+    _clientUpdatedAt: now,
+    _serverSyncedAt: now,
+    _syncAttempts: 0,
+    _lastSyncError: null,
+    _conflictData: null,
+    _version: 1,
+  };
+}
+
+// Helper to create default sync metadata for new pending items
+export function createPendingMetadata(): SyncMetadata {
+  const now = new Date().toISOString();
+  return {
+    _syncStatus: SYNC_STATUS.PENDING,
+    _clientId: localStorage.getItem('clientId') || '',
+    _clientCreatedAt: now,
+    _clientUpdatedAt: now,
+    _serverSyncedAt: null,
+    _syncAttempts: 0,
+    _lastSyncError: null,
+    _conflictData: null,
+    _version: 1,
+  };
+}
+
 // Local entities with sync metadata
 export interface LocalProduct extends SyncMetadata {
   id: string;

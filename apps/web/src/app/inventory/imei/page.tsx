@@ -3,9 +3,9 @@ import { ArrowLeft, Plus, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { useIMEIInventory } from '@/hooks/useInventory';
-import { formatCurrency, formatDate } from '@/lib/utils/format';
+import { formatCurrency } from '@/lib/utils/format';
 import {
   Select,
   SelectContent,
@@ -124,12 +124,12 @@ export function IMEIPage() {
                   </div>
                   <div className="flex justify-between pt-2 border-t">
                     <span className="text-muted-foreground">Cost</span>
-                    <span>{formatCurrency(parseFloat(item.costPrice))}</span>
+                    <span>{formatCurrency(item.costPrice)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Sale Price</span>
                     <span className="font-medium">
-                      {formatCurrency(parseFloat(item.salePrice || '0'))}
+                      {formatCurrency(item.salePrice || 0)}
                     </span>
                   </div>
                 </div>

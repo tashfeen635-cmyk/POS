@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
-import { db, generateOfflineId } from '@/lib/db';
+import { db, generateOfflineId, createSyncedMetadata, createPendingMetadata, addToSyncQueue } from '@/lib/db';
 import { useUIStore } from '@/stores/ui.store';
 import type { Customer, CustomerFilterInput, CreateCustomerInput, UpdateCustomerInput } from '@pos/shared';
 
@@ -14,7 +14,7 @@ export function useCustomers(filters: CustomerFilterInput = { page: 1, limit: 50
         const response = await api.getPaginated<Customer>('/api/customers', filters as Record<string, string | number | boolean>);
         // Cache customers locally
         if (response.data) {
-          await db.customers.bulkPut(response.data.map(c => ({ ...c, _syncStatus: 'synced' as const })));
+          await db.customers.bulkPut(response.data.map(c => ({ ...c, ...createSyncedMetadata() })));
         }
         return response;
       } else {
@@ -47,7 +47,7 @@ export function useCustomer(id: string | undefined) {
       if (isOnline) {
         const response = await api.get<Customer>(`/api/customers/${id}`);
         if (response.data) {
-          await db.customers.put({ ...response.data, _syncStatus: 'synced' });
+          await db.customers.put({ ...response.data, ...createSyncedMetadata() });
         }
         return response.data;
       } else {
@@ -109,22 +109,16 @@ export function useCreateCustomer() {
 
         await db.customers.add({
           ...offlineCustomer,
-          _syncStatus: 'pending',
-          _clientId: localStorage.getItem('clientId') || '',
-          _clientCreatedAt: new Date().toISOString(),
-          _clientUpdatedAt: new Date().toISOString(),
-          _syncAttempts: 0,
+          ...createPendingMetadata(),
         });
 
         // Add to sync queue
-        await db.syncQueue.add({
-          table: 'customers',
-          operation: 'create',
-          recordId: offlineCustomer.id,
-          data: input as unknown as Record<string, unknown>,
-          timestamp: new Date().toISOString(),
-          attempts: 0,
-        });
+        await addToSyncQueue(
+          'customers',
+          'create',
+          offlineCustomer.id,
+          input as unknown as Record<string, unknown>
+        );
 
         return offlineCustomer;
       }

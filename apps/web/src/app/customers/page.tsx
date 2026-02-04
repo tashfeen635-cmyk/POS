@@ -111,18 +111,18 @@ export function CustomersPage() {
                     <span className="text-muted-foreground">Balance</span>
                     <span
                       className={`font-medium ${
-                        parseFloat(customer.currentBalance) > 0
+                        Number(customer.currentBalance) > 0
                           ? 'text-destructive'
                           : 'text-success'
                       }`}
                     >
-                      {formatCurrency(parseFloat(customer.currentBalance))}
+                      {formatCurrency(customer.currentBalance)}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Total Purchases</span>
                     <span className="font-medium">
-                      {formatCurrency(parseFloat(customer.totalPurchases))}
+                      {formatCurrency(customer.totalPurchases)}
                     </span>
                   </div>
                 </div>

@@ -1,5 +1,4 @@
 import { Search } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -11,7 +10,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAvailableIMEIs } from '@/hooks/useInventory';
 import { formatCurrency } from '@/lib/utils/format';
 import type { Product, IMEIInventory } from '@pos/shared';
+import type { LocalIMEI } from '@/lib/db/schema';
 import { useState } from 'react';
+
+type IMEILike = IMEIInventory | LocalIMEI;
 
 interface IMEISelectorProps {
   open: boolean;
@@ -62,11 +64,11 @@ export function IMEISelector({ open, onOpenChange, product, onSelect }: IMEISele
               </p>
             ) : (
               <div className="space-y-2">
-                {filteredIMEIs.map((imei) => (
+                {filteredIMEIs.map((imei: IMEILike) => (
                   <div
                     key={imei.id}
                     className="p-3 rounded-lg border cursor-pointer hover:border-primary transition-colors"
-                    onClick={() => onSelect(imei)}
+                    onClick={() => onSelect(imei as IMEIInventory)}
                   >
                     <div className="flex justify-between items-start">
                       <div>
@@ -78,7 +80,7 @@ export function IMEISelector({ open, onOpenChange, product, onSelect }: IMEISele
                         )}
                       </div>
                       <p className="font-bold">
-                        {formatCurrency(parseFloat(imei.salePrice || product.salePrice))}
+                        {formatCurrency(imei.salePrice || product.salePrice)}
                       </p>
                     </div>
                     <div className="flex gap-4 mt-2 text-sm text-muted-foreground">

@@ -14,6 +14,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAvailableBatches } from '@/hooks/useInventory';
 import { formatCurrency, formatDate } from '@/lib/utils/format';
 import type { Product, ProductBatch } from '@pos/shared';
+import type { LocalBatch } from '@/lib/db/schema';
+
+type BatchLike = ProductBatch | LocalBatch;
 
 interface BatchSelectorProps {
   open: boolean;
@@ -23,20 +26,20 @@ interface BatchSelectorProps {
 }
 
 export function BatchSelector({ open, onOpenChange, product, onSelect }: BatchSelectorProps) {
-  const [selectedBatch, setSelectedBatch] = useState<ProductBatch | null>(null);
+  const [selectedBatch, setSelectedBatch] = useState<BatchLike | null>(null);
   const [quantity, setQuantity] = useState(1);
 
   const { data: batches, isLoading } = useAvailableBatches(product.id);
 
   const handleSelect = () => {
     if (selectedBatch && quantity > 0) {
-      onSelect(selectedBatch, quantity);
+      onSelect(selectedBatch as ProductBatch, quantity);
       setSelectedBatch(null);
       setQuantity(1);
     }
   };
 
-  const getAvailableQuantity = (batch: ProductBatch) => {
+  const getAvailableQuantity = (batch: BatchLike) => {
     return batch.quantity - batch.soldQuantity;
   };
 
@@ -97,7 +100,7 @@ export function BatchSelector({ open, onOpenChange, product, onSelect }: BatchSe
                         </div>
                         <div className="text-right">
                           <p className="font-bold">
-                            {formatCurrency(parseFloat(batch.salePrice || product.salePrice))}
+                            {formatCurrency(batch.salePrice || product.salePrice)}
                           </p>
                           <p className="text-sm text-muted-foreground">
                             <Package className="h-4 w-4 inline mr-1" />

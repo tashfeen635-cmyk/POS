@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
-import { db } from '@/lib/db';
+import { db, createSyncedMetadata } from '@/lib/db';
 import { useUIStore } from '@/stores/ui.store';
 import type { Product, Category, ProductFilterInput, CreateProductInput, UpdateProductInput } from '@pos/shared';
 
@@ -14,7 +14,7 @@ export function useProducts(filters: ProductFilterInput = { page: 1, limit: 50 }
         const response = await api.getPaginated<Product>('/api/products', filters as Record<string, string | number | boolean>);
         // Cache products locally
         if (response.data) {
-          await db.products.bulkPut(response.data.map(p => ({ ...p, _syncStatus: 'synced' as const })));
+          await db.products.bulkPut(response.data.map(p => ({ ...p, ...createSyncedMetadata() })));
         }
         return response;
       } else {
@@ -49,7 +49,7 @@ export function useProduct(id: string | undefined) {
       if (isOnline) {
         const response = await api.get<Product>(`/api/products/${id}`);
         if (response.data) {
-          await db.products.put({ ...response.data, _syncStatus: 'synced' });
+          await db.products.put({ ...response.data, ...createSyncedMetadata() });
         }
         return response.data;
       } else {
@@ -125,7 +125,7 @@ export function useCategories() {
       if (isOnline) {
         const response = await api.get<Category[]>('/api/products/categories/list');
         if (response.data) {
-          await db.categories.bulkPut(response.data.map(c => ({ ...c, _syncStatus: 'synced' as const })));
+          await db.categories.bulkPut(response.data.map(c => ({ ...c, ...createSyncedMetadata() })));
         }
         return response.data;
       } else {
