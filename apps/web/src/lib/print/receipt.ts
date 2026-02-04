@@ -196,10 +196,11 @@ export async function generateReceiptHTML(sale: LocalSale): Promise<string> {
 
   // Add items
   for (const item of sale.items) {
-    const name = item.productName.substring(0, limits.productName);
+    const productName = item.productName || item.product?.name || 'Unknown Product';
+    const name = productName.substring(0, limits.productName);
     const qty = item.quantity;
-    const price = parseFloat(item.unitPrice);
-    const total = parseFloat(item.total);
+    const price = parseFloat(String(item.unitPrice));
+    const total = parseFloat(String(item.total));
 
     html += `
   <div>
@@ -390,12 +391,13 @@ export async function generateReceiptText(sale: LocalSale): Promise<string> {
 
   // Items
   for (const item of sale.items) {
-    const name = item.productName.substring(0, limits.productName);
+    const productName = item.productName || item.product?.name || 'Unknown Product';
+    const name = productName.substring(0, limits.productName);
     receipt += name + '\n';
     receipt +=
       rightAlign(
-        `  ${item.quantity} x ${formatCurrency(parseFloat(item.unitPrice), false)}`,
-        formatCurrency(parseFloat(item.total), false)
+        `  ${item.quantity} x ${formatCurrency(parseFloat(String(item.unitPrice)), false)}`,
+        formatCurrency(parseFloat(String(item.total)), false)
       ) + '\n';
 
     if (item.imeiNumber) {
@@ -409,30 +411,30 @@ export async function generateReceiptText(sale: LocalSale): Promise<string> {
   receipt += thinDivider + '\n';
 
   // Totals
-  receipt += rightAlign('Subtotal:', formatCurrency(parseFloat(sale.subtotal), false)) + '\n';
+  receipt += rightAlign('Subtotal:', formatCurrency(sale.subtotal, false)) + '\n';
 
-  const discount = parseFloat(sale.discount);
+  const discount = Number(sale.discount);
   if (discount > 0) {
     receipt += rightAlign('Discount:', `-${formatCurrency(discount, false)}`) + '\n';
   }
 
-  const tax = parseFloat(sale.taxAmount);
+  const tax = Number(sale.taxAmount);
   if (tax > 0) {
     receipt += rightAlign('Tax:', formatCurrency(tax, false)) + '\n';
   }
 
   receipt += thinDivider + '\n';
-  receipt += rightAlign('TOTAL:', formatCurrency(parseFloat(sale.total), false)) + '\n';
+  receipt += rightAlign('TOTAL:', formatCurrency(sale.total, false)) + '\n';
   receipt += thinDivider + '\n';
 
   // Payments
   receipt += center('PAYMENT') + '\n';
   for (const payment of sale.payments) {
-    receipt += rightAlign(`${payment.method}:`, formatCurrency(parseFloat(payment.amount), false)) + '\n';
+    receipt += rightAlign(`${payment.method}:`, formatCurrency(payment.amount, false)) + '\n';
   }
 
-  const changeAmount = parseFloat(sale.changeAmount);
-  const dueAmount = parseFloat(sale.dueAmount);
+  const changeAmount = Number(sale.changeAmount);
+  const dueAmount = Number(sale.dueAmount);
 
   if (changeAmount > 0) {
     receipt += rightAlign('Change:', formatCurrency(changeAmount, false)) + '\n';
@@ -687,9 +689,10 @@ export async function generateESCPOSCommands(sale: LocalSale): Promise<Uint8Arra
   addText('--------------------------------\n');
 
   for (const item of sale.items) {
-    addText(`${item.productName.substring(0, 24)}\n`);
-    const qtyPrice = `  ${item.quantity} x ${formatCurrency(parseFloat(item.unitPrice), false)}`;
-    const total = formatCurrency(parseFloat(item.total), false);
+    const productName = item.productName || item.product?.name || 'Unknown Product';
+    addText(`${productName.substring(0, 24)}\n`);
+    const qtyPrice = `  ${item.quantity} x ${formatCurrency(parseFloat(String(item.unitPrice)), false)}`;
+    const total = formatCurrency(parseFloat(String(item.total)), false);
     const spaces = 32 - qtyPrice.length - total.length;
     addText(qtyPrice + ' '.repeat(Math.max(1, spaces)) + total + '\n');
 
