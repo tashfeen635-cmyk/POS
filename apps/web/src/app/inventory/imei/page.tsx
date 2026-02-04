@@ -17,11 +17,11 @@ import { IMEI_STATUS } from '@pos/shared';
 
 export function IMEIPage() {
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<string>('');
+  const [status, setStatus] = useState<string>('all');
 
   const { data, isLoading } = useIMEIInventory({
     search: search || undefined,
-    status: status as any || undefined,
+    status: status === 'all' ? undefined : status as any,
     page: 1,
     limit: 50,
   });
@@ -65,7 +65,7 @@ export function IMEIPage() {
                 <SelectValue placeholder="All Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
+                <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value={IMEI_STATUS.IN_STOCK}>In Stock</SelectItem>
                 <SelectItem value={IMEI_STATUS.SOLD}>Sold</SelectItem>
                 <SelectItem value={IMEI_STATUS.RESERVED}>Reserved</SelectItem>

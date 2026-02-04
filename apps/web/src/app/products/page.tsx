@@ -16,11 +16,11 @@ import {
 
 export function ProductsPage() {
   const [search, setSearch] = useState('');
-  const [categoryId, setCategoryId] = useState<string>('');
+  const [categoryId, setCategoryId] = useState<string>('all');
 
   const { data: productsData, isLoading } = useProducts({
     search: search || undefined,
-    categoryId: categoryId || undefined,
+    categoryId: categoryId === 'all' ? undefined : categoryId,
     page: 1,
     limit: 50,
   });
@@ -63,7 +63,7 @@ export function ProductsPage() {
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Categories</SelectItem>
+                <SelectItem value="all">All Categories</SelectItem>
                 {categories?.map((category) => (
                   <SelectItem key={category.id} value={category.id}>
                     {category.name}

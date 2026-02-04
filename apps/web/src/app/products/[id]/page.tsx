@@ -184,14 +184,14 @@ export function ProductFormPage() {
             <div>
               <Label htmlFor="categoryId">Category</Label>
               <Select
-                value={watch('categoryId') || ''}
-                onValueChange={(v) => setValue('categoryId', v || undefined)}
+                value={watch('categoryId') || '__none__'}
+                onValueChange={(v) => setValue('categoryId', v === '__none__' ? undefined : v)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No Category</SelectItem>
+                  <SelectItem value="__none__">No Category</SelectItem>
                   {categories?.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.name}

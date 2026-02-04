@@ -23,12 +23,12 @@ import type { Sale } from '@pos/shared';
 
 export function SalesPage() {
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<string>('');
+  const [status, setStatus] = useState<string>('all');
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
 
   const { data, isLoading } = useSales({
     search: search || undefined,
-    status: status as any || undefined,
+    status: status === 'all' ? undefined : status as any,
     page: 1,
     limit: 50,
   });
@@ -61,7 +61,7 @@ export function SalesPage() {
                 <SelectValue placeholder="All Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
+                <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="completed">Completed</SelectItem>
                 <SelectItem value="partially_paid">Partially Paid</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
