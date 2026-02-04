@@ -1,0 +1,30 @@
+{
+  "name": "pos-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modern offline-first POS system for mobile shops and medical stores",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @pos/db generate",
+    "db:migrate": "pnpm --filter @pos/db migrate",
+    "db:push": "pnpm --filter @pos/db push",
+    "db:seed": "pnpm --filter @pos/db seed",
+    "db:studio": "pnpm --filter @pos/db studio",
+    "clean": "turbo run clean && rimraf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@9.14.4",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
