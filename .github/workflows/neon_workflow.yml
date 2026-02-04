@@ -1,0 +1,63 @@
+name: Neon Database Branching
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+env:
+  NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+  NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+jobs:
+  create-branch:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      db_url: ${{ steps.create-branch.outputs.db_url }}
+      branch_id: ${{ steps.create-branch.outputs.branch_id }}
+    steps:
+      - name: Create Neon Branch
+        id: create-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ env.NEON_PROJECT_ID }}
+          branch_name: pr-${{ github.event.number }}-${{ github.head_ref }}
+          api_key: ${{ env.NEON_API_KEY }}
+          username: neondb_owner
+
+      - name: Comment on PR with Branch Info
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const branchId = '${{ steps.create-branch.outputs.branch_id }}';
+            const dbUrl = '${{ steps.create-branch.outputs.db_url }}';
+            const projectId = '${{ env.NEON_PROJECT_ID }}';
+
+            const comment = `## 🗄️ Neon Database Branch Created
+
+            A preview database branch has been created for this PR.
+
+            **Branch ID:** \`${branchId}\`
+            **Console:** [View in Neon Console](https://console.neon.tech/app/projects/${projectId}/branches/${branchId})
+
+            The branch will be automatically deleted when this PR is closed.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  delete-branch:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Neon Branch
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ env.NEON_PROJECT_ID }}
+          branch: pr-${{ github.event.number }}-${{ github.head_ref }}
+          api_key: ${{ env.NEON_API_KEY }}
