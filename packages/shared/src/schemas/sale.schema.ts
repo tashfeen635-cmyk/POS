@@ -67,11 +67,11 @@ export const saleFilterSchema = z.object({
     SALE_STATUS.REFUNDED,
     SALE_STATUS.CANCELLED,
   ]).optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
   search: z.string().optional(), // Invoice number
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 // Return / Refund

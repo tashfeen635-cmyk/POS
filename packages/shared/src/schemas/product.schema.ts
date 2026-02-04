@@ -87,10 +87,10 @@ export const productFilterSchema = z.object({
   search: z.string().optional(),
   categoryId: z.string().uuid().optional(),
   productType: productTypeEnum.optional(),
-  isActive: z.boolean().optional(),
-  lowStock: z.boolean().optional(),
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  isActive: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
+  lowStock: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export type CreateProductInput = z.infer<typeof createProductSchema>;

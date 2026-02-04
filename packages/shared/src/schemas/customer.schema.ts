@@ -16,10 +16,10 @@ export const updateCustomerSchema = createCustomerSchema.partial();
 
 export const customerFilterSchema = z.object({
   search: z.string().optional(),
-  hasCredit: z.boolean().optional(),
-  isActive: z.boolean().optional(),
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  hasCredit: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
+  isActive: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;

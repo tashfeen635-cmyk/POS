@@ -38,8 +38,8 @@ export const imeiFilterSchema = z.object({
     IMEI_STATUS.RESERVED,
   ]).optional(),
   search: z.string().optional(),
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 // Batch Inventory (Medical)
@@ -65,11 +65,11 @@ export const updateBatchSchema = z.object({
 
 export const batchFilterSchema = z.object({
   productId: z.string().uuid().optional(),
-  expiringSoon: z.boolean().optional(), // Next 90 days
-  expired: z.boolean().optional(),
+  expiringSoon: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
+  expired: z.preprocess((val) => val === 'true' || val === true, z.boolean().optional()),
   search: z.string().optional(),
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 // Stock Adjustment

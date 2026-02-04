@@ -50,10 +50,10 @@ export const tradeInFilterSchema = z.object({
     TRADE_IN_STATUS.COMPLETED,
   ]).optional(),
   search: z.string().optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export type CreateTradeInInput = z.infer<typeof createTradeInSchema>;

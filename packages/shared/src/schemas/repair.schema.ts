@@ -59,10 +59,10 @@ export const repairFilterSchema = z.object({
     REPAIR_STATUS.CANCELLED,
   ]).optional(),
   search: z.string().optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export type CreateRepairInput = z.infer<typeof createRepairSchema>;
